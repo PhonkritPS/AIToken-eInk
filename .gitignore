@@ -1,0 +1,12 @@
+# Compiled output & IDE artifacts
+build/
+.arduino/
+*.hex
+*.bin
+*.elf
+
+# OS & Editor
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
