@@ -28,12 +28,12 @@
 #define EPD_BUSY D2 // GPIO4
 
 // =========================================================================
-// เลือกรุ่นหน้าจอ E-ink (2.9 นิ้ว 3 สี ดำ/ขาว/แดง: ZJYE290S08ROG01)
+// เลือกรุ่นหน้าจอ E-ink (ปิดโหมด 3 สี เพื่อใช้จอ ขาว-ดำ รุ่นใหม่)
 // =========================================================================
-#define USE_3COLOR_DISPLAY
+//#define USE_3COLOR_DISPLAY  // <--- คอมเมนต์บรรทัดนี้ไว้เพื่อใช้จอ ขาว-ดำ
 
 #ifndef GxEPD_RED
-  #define GxEPD_RED 0xF800
+  #define GxEPD_RED 0xF800 // แม้เป็นจอขาว-ดำ ก็ประกาศเผื่อไว้กัน Error จากฟังก์ชันที่เรียกใช้สีแดง
 #endif
 
 #ifdef USE_3COLOR_DISPLAY
@@ -42,8 +42,8 @@
   GxEPD2_3C<GxEPD2_290_C90c, GxEPD2_290_C90c::HEIGHT> display(GxEPD2_290_C90c(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 #else
   #include <GxEPD2_BW.h>
-  // จอ 2.9" ขาว-ดำ มาตรฐาน
-  GxEPD2_BW<GxEPD2_290_T94, GxEPD2_290_T94::HEIGHT> display(GxEPD2_290_T94(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
+  // จอ 2.9" ขาว-ดำ สำหรับสายแพร E029A01 (E029A01-FPCA-V2.0 / E029A01N16C810 -> ชิป SSD1608 / GDEH029A1)
+  GxEPD2_BW<GxEPD2_290, GxEPD2_290::HEIGHT> display(GxEPD2_290(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 #endif
 
 // Wi-Fi Config
@@ -78,7 +78,7 @@ void setup() {
   Serial.begin(115200);
 
   // 1. เริ่มการทำงานจอ E-ink
-  display.init(115200, true, 2, false); 
+  display.init(115200); 
   display.setRotation(1); // แนวนอน 296 x 128
   display.setTextColor(GxEPD_BLACK);
 
@@ -325,8 +325,11 @@ void updateSingleBarPartial(int y, int h, int percent, const char* label, const 
 // ฟังก์ชันวาดกราฟแท่ง (Progress Bar) พร้อมแสดง % และจำนวนวันที่เหลือ (สั้นลงเพื่อเว้นที่)
 // =========================================================================
 void drawProgressBar(int x, int y, int w, int h, int percent, const char* label, const char* extraInfo) {
-  // เงื่อนไขสี: หากเหลือน้อยกว่า 10% ให้เปลี่ยนเป็นสีแดง (GxEPD_RED) นอกนั้นเป็นสีดำ (GxEPD_BLACK)
+#ifdef USE_3COLOR_DISPLAY
   uint16_t color = (percent < 10) ? GxEPD_RED : GxEPD_BLACK;
+#else
+  uint16_t color = GxEPD_BLACK;
+#endif
 
   display.setFont(); // ใช้ฟอนต์มาตรฐาน
   display.setTextColor(color);
