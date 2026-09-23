@@ -11,6 +11,7 @@ An ESP8266-based real-time AI Quota monitor using a 2.9" 3-color (Black/White/Re
 - **Visual Alerts**: Highlights low quota (<10%) in **Red** (on 3-color screens).
 - **Wi-Fi Connectivity**: Automatically reconnects to Wi-Fi and shows status icon.
 - **Antigravity / AI Token Monitoring**: Tracks Weekly and 5-Hour limits for Gemini and Claude / GPT models.
+- **Second Display – Claude Code**: Shows Claude Code plan limits (Weekly / 5-Hour remaining + reset time) and token usage for today and the current 5-hour window (in / out / cache). Data comes from the same bridge server (`AIToken/bridge_server.js`, started with `start_bridge.bat`).
 
 ---
 
@@ -70,7 +71,14 @@ const unsigned long refreshInterval = 60000; // Interval in ms (e.g. 1 minute)
   "claudeWeekly": 42,
   "claudeWeeklySubtext": "2d left",
   "claude5Hr": 8,
-  "claude5HrSubtext": "45m left"
+  "claude5HrSubtext": "45m left",
+
+  "ccWeekly": 57,
+  "ccWeeklyReset": "2d 23h",
+  "cc5Hr": 97,
+  "cc5HrReset": "4h 51m",
+  "ccTodayTokens": "3.96M", "ccTodayIn": "160k", "ccTodayOut": "64k", "ccTodayCache": "3.73M",
+  "ccWindowTokens": "1.09M", "ccWindowIn": "63k", "ccWindowOut": "11k", "ccWindowCache": "1.01M"
 }
 ```
 

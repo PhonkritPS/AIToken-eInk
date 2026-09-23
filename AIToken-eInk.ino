@@ -78,16 +78,45 @@ String prevCwTime = "";
 String prevC5Time = "";
 bool isFirstRender = true;
 
+// ตัวแปรเก็บค่าเดิมของจอที่ 2 (Claude Code)
+struct ClaudeCodeData {
+  int weekly;
+  int fiveHr;
+  String weeklySub;
+  String fiveHrSub;
+  String todayTotal, todayIn, todayOut, todayCache;
+  String windowTotal, windowIn, windowOut, windowCache;
+
+  bool operator!=(const ClaudeCodeData &o) const {
+    return weekly != o.weekly || fiveHr != o.fiveHr ||
+           weeklySub != o.weeklySub || fiveHrSub != o.fiveHrSub ||
+           todayTotal != o.todayTotal || todayIn != o.todayIn ||
+           todayOut != o.todayOut || todayCache != o.todayCache ||
+           windowTotal != o.windowTotal || windowIn != o.windowIn ||
+           windowOut != o.windowOut || windowCache != o.windowCache;
+  }
+};
+ClaudeCodeData prevCc = {-1, -1};
+bool isFirstRender2 = true;
+int partialCount2 = 0;
+const int fullRefreshEvery2 = 30; // Full Refresh ทุกๆ 30 ครั้ง ลดภาพเงาค้างบนจอ E-ink
+
 // Prototype functions
 void fetchAndDisplayQuota();
 void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
                        String g5Sub, String cwSub, String c5Sub);
 void updateSingleBarPartial(int y, int h, int percent, const char *label,
                             const char *sub);
-void drawProgressBar(int x, int y, int w, int h, int percent, const char *label,
-                     const char *sub);
+void drawProgressBar(Adafruit_GFX &gfx, int x, int y, int w, int h,
+                     int percent, const char *label, const char *sub);
+void updateClaudeCodeDisplay(const ClaudeCodeData &cc);
+void drawClaudeCodeData(const ClaudeCodeData &cc);
+void drawTokenRow(Adafruit_GFX &gfx, int x, int y, const char *label,
+                  const String &total, const String &in, const String &out,
+                  const String &cache);
 void drawBootScreen(const char *text);
-void drawWiFiIconEink(int x, int y);
+void drawBootScreen2(const char *text);
+void drawWiFiIconEink(Adafruit_GFX &gfx, int x, int y);
 
 void setup() {
   Serial.begin(115200);
@@ -103,19 +132,11 @@ void setup() {
   display.setRotation(1); // แนวนอน 296 x 128
   display.setTextColor(GxEPD_BLACK);
 
-  // 2. เริ่มการทำงานและแสดงข้อความบนจอที่ 2
+  // 2. เริ่มการทำงานจอที่ 2 (แสดงข้อมูล Claude Code)
   display2.init(115200);
   display2.setRotation(1); // แนวนอน 296 x 128
   display2.setTextColor(GxEPD_BLACK);
-  display2.setFont(&FreeSansBold9pt7b);
-  display2.setFullWindow();
-  display2.firstPage();
-  do {
-    display2.fillScreen(GxEPD_WHITE);
-    display2.setCursor(45, 68);
-    display2.print("HELLO MONITOR 2");
-  } while (display2.nextPage());
-  display2.powerOff(); // พักหน้าจอหลังวาดเสร็จ
+  drawBootScreen2("Claude Code\nWaiting for data...");
 
   // 3. แสดงหน้าจอเริ่มต้นบนจอหลัก
   drawBootScreen("Connecting to Wi-Fi...");
@@ -246,6 +267,26 @@ void fetchAndDisplayQuota() {
       } else {
         Serial.println("[INFO] Data unchanged -> Skipping display update.");
       }
+
+      // --- จอที่ 2: Claude Code (ใช้ฟิลด์ cc* จาก bridge_server.js ตัวเดียวกัน) ---
+      ClaudeCodeData cc;
+      cc.weekly = doc["ccWeekly"] | 100;
+      cc.fiveHr = doc["cc5Hr"] | 100;
+      cc.weeklySub = doc["ccWeeklyReset"] | ""; // แบบสั้น เช่น "2d 16h"
+      cc.fiveHrSub = doc["cc5HrReset"] | "";
+      cc.todayTotal = doc["ccTodayTokens"] | "0";
+      cc.todayIn = doc["ccTodayIn"] | "0";
+      cc.todayOut = doc["ccTodayOut"] | "0";
+      cc.todayCache = doc["ccTodayCache"] | "0";
+      cc.windowTotal = doc["ccWindowTokens"] | "0";
+      cc.windowIn = doc["ccWindowIn"] | "0";
+      cc.windowOut = doc["ccWindowOut"] | "0";
+      cc.windowCache = doc["ccWindowCache"] | "0";
+
+      if (isFirstRender2 || cc != prevCc) {
+        Serial.println("[INFO] Claude Code data changed -> Updating display2...");
+        updateClaudeCodeDisplay(cc);
+      }
     } else {
       Serial.println("[ERROR] JSON Parse error");
     }
@@ -283,8 +324,8 @@ void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
       display.setCursor(5, 28);
       display.print("GEMINI MODELS");
 
-      drawProgressBar(5, 38, 280, 11, gw, "Weekly", gwSub.c_str());
-      drawProgressBar(5, 54, 280, 11, g5, "5 Hour", g5Sub.c_str());
+      drawProgressBar(display, 5, 38, 280, 11, gw, "Weekly", gwSub.c_str());
+      drawProgressBar(display, 5, 54, 280, 11, g5, "5 Hour", g5Sub.c_str());
 
       // เส้นคั่นกลาง
       display.drawLine(5, 70, 291, 70, GxEPD_BLACK);
@@ -295,11 +336,11 @@ void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
       display.setCursor(5, 80);
       display.print("CLAUDE & GPT MODELS");
 
-      drawProgressBar(5, 90, 280, 11, cw, "Weekly", cwSub.c_str());
-      drawProgressBar(5, 106, 280, 11, c5, "5 Hour", c5Sub.c_str());
+      drawProgressBar(display, 5, 90, 280, 11, cw, "Weekly", cwSub.c_str());
+      drawProgressBar(display, 5, 106, 280, 11, c5, "5 Hour", c5Sub.c_str());
 
       // ไอคอน Wi-Fi มุมขวาบน
-      drawWiFiIconEink(275, 5);
+      drawWiFiIconEink(display, 275, 5);
 
     } while (display.nextPage());
 
@@ -338,8 +379,8 @@ void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
         display.setTextColor(GxEPD_BLACK);
         display.setCursor(5, 28);
         display.print("GEMINI MODELS");
-        drawProgressBar(5, 38, 280, 11, gw, "Weekly", gwSub.c_str());
-        drawProgressBar(5, 54, 280, 11, g5, "5 Hour", g5Sub.c_str());
+        drawProgressBar(display, 5, 38, 280, 11, gw, "Weekly", gwSub.c_str());
+        drawProgressBar(display, 5, 54, 280, 11, g5, "5 Hour", g5Sub.c_str());
 
         // เส้นคั่นกลาง
         display.drawLine(5, 70, 291, 70, GxEPD_BLACK);
@@ -349,8 +390,8 @@ void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
         display.setTextColor(GxEPD_BLACK);
         display.setCursor(5, 80);
         display.print("CLAUDE & GPT MODELS");
-        drawProgressBar(5, 90, 280, 11, cw, "Weekly", cwSub.c_str());
-        drawProgressBar(5, 106, 280, 11, c5, "5 Hour", c5Sub.c_str());
+        drawProgressBar(display, 5, 90, 280, 11, cw, "Weekly", cwSub.c_str());
+        drawProgressBar(display, 5, 106, 280, 11, c5, "5 Hour", c5Sub.c_str());
       } while (display.nextPage());
     }
   }
@@ -367,6 +408,96 @@ void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
 }
 
 // =========================================================================
+// จอที่ 2: แสดงโควต้าและ Token ของ Claude Code
+// =========================================================================
+void updateClaudeCodeDisplay(const ClaudeCodeData &cc) {
+  bool doFull = isFirstRender2 || partialCount2 >= fullRefreshEvery2;
+
+  if (doFull) {
+    display2.setFullWindow();
+    display2.firstPage();
+    do {
+      display2.fillScreen(GxEPD_WHITE);
+
+      // --- Header ---
+      display2.setFont(&FreeSansBold9pt7b);
+      display2.setTextColor(GxEPD_BLACK);
+      display2.setCursor(5, 18);
+      display2.print("Claude Code Usage");
+      display2.drawLine(5, 23, 291, 23, GxEPD_BLACK);
+
+      drawClaudeCodeData(cc);
+      drawWiFiIconEink(display2, 275, 5);
+    } while (display2.nextPage());
+
+    isFirstRender2 = false;
+    partialCount2 = 0;
+  } else {
+    // Partial Refresh เฉพาะโซนข้อมูลใต้ Header
+    display2.setPartialWindow(0, 26, display2.width(), 98);
+    display2.firstPage();
+    do {
+      display2.fillRect(0, 26, display2.width(), 98, GxEPD_WHITE);
+      drawClaudeCodeData(cc);
+    } while (display2.nextPage());
+    partialCount2++;
+  }
+  display2.powerOff();
+
+  prevCc = cc;
+}
+
+// วาดโซนข้อมูล (ใต้ Header) ของจอที่ 2
+void drawClaudeCodeData(const ClaudeCodeData &cc) {
+  // --- Plan Limits Section ---
+  display2.setFont();
+  display2.setTextColor(GxEPD_BLACK);
+  display2.setCursor(5, 28);
+  display2.print("PLAN LIMITS");
+
+  drawProgressBar(display2, 5, 38, 280, 11, cc.weekly, "Weekly",
+                  cc.weeklySub.c_str());
+  drawProgressBar(display2, 5, 54, 280, 11, cc.fiveHr, "5 Hour",
+                  cc.fiveHrSub.c_str());
+
+  // เส้นคั่นกลาง
+  display2.drawLine(5, 70, 291, 70, GxEPD_BLACK);
+
+  // --- Tokens Section ---
+  display2.setFont();
+  display2.setTextColor(GxEPD_BLACK);
+  display2.setCursor(5, 80);
+  display2.print("TOKENS");
+
+  drawTokenRow(display2, 5, 90, "Today", cc.todayTotal, cc.todayIn,
+               cc.todayOut, cc.todayCache);
+  drawTokenRow(display2, 5, 106, "5 Hour", cc.windowTotal, cc.windowIn,
+               cc.windowOut, cc.windowCache);
+}
+
+// วาดแถว Token: ชื่อ | ยอดรวม | in / out / cache (ฟอนต์มาตรฐาน 6px ต่อตัวอักษร)
+void drawTokenRow(Adafruit_GFX &gfx, int x, int y, const char *label,
+                  const String &total, const String &in, const String &out,
+                  const String &cache) {
+  gfx.setFont();
+  gfx.setTextColor(GxEPD_BLACK);
+
+  gfx.setCursor(x, y + 2);
+  gfx.print(label);
+
+  gfx.setCursor(x + 44, y + 2);
+  gfx.print(total);
+
+  gfx.setCursor(x + 92, y + 2);
+  gfx.print("in ");
+  gfx.print(in);
+  gfx.print(" out ");
+  gfx.print(out);
+  gfx.print(" cache ");
+  gfx.print(cache);
+}
+
+// =========================================================================
 // ฟังก์ชันอัปเดตเฉพาะแถวบาร์ที่ระบุ (Partial Refresh Byte-Aligned)
 // =========================================================================
 void updateSingleBarPartial(int y, int h, int percent, const char *label,
@@ -376,49 +507,49 @@ void updateSingleBarPartial(int y, int h, int percent, const char *label,
   do {
     // ล้างเฉพาะแถบความสูงนี้ด้วยสีขาว
     display.fillRect(0, y, display.width(), h, GxEPD_WHITE);
-    drawProgressBar(5, y + 2, 280, 11, percent, label, extraInfo);
+    drawProgressBar(display, 5, y + 2, 280, 11, percent, label, extraInfo);
   } while (display.nextPage());
 }
 
 // =========================================================================
 // ฟังก์ชันวาดกราฟแท่ง (Progress Bar) พร้อมแสดง % และจำนวนวันที่เหลือ (สั้นลงเพื่อเว้นที่)
 // =========================================================================
-void drawProgressBar(int x, int y, int w, int h, int percent, const char *label,
-                     const char *extraInfo) {
+void drawProgressBar(Adafruit_GFX &gfx, int x, int y, int w, int h,
+                     int percent, const char *label, const char *extraInfo) {
 #ifdef USE_3COLOR_DISPLAY
   uint16_t color = (percent < 10) ? GxEPD_RED : GxEPD_BLACK;
 #else
   uint16_t color = GxEPD_BLACK;
 #endif
 
-  display.setFont(); // ใช้ฟอนต์มาตรฐาน
-  display.setTextColor(color);
+  gfx.setFont(); // ใช้ฟอนต์มาตรฐาน
+  gfx.setTextColor(color);
 
   // 1. พิมพ์ Label (เช่น Weekly, 5 Hour)
-  display.setCursor(x, y + 2);
-  display.print(label);
+  gfx.setCursor(x, y + 2);
+  gfx.print(label);
 
   // 2. พิมพ์ตัวเลขเปอร์เซ็นต์
-  display.setCursor(x + 44, y + 2);
-  display.print(percent);
-  display.print("%");
+  gfx.setCursor(x + 44, y + 2);
+  gfx.print(percent);
+  gfx.print("%");
 
   // 3. วาดกรอบสี่เหลี่ยมของแถบบาร์ (ปรับความกว้างเป็น 130px เพื่อให้มีพื้นที่เหลือทางขวาสำหรับ
   // Subtext)
   int barX = x + 68;
   int barW = 130;
-  display.drawRect(barX, y, barW, h, color);
+  gfx.drawRect(barX, y, barW, h, color);
 
   // 4. เติมสีแถบ Progress ด้านใน
   int fillW = (percent * (barW - 2)) / 100;
   if (fillW > 0) {
-    display.fillRect(barX + 1, y + 1, fillW, h - 2, color);
+    gfx.fillRect(barX + 1, y + 1, fillW, h - 2, color);
   }
 
   // 5. แสดงข้อความจำนวนวันที่เหลือ / เวลาที่เหลือ (ทางขวาของแถบบาร์)
   if (extraInfo != nullptr && strlen(extraInfo) > 0) {
-    display.setCursor(barX + barW + 8, y + 2);
-    display.print(extraInfo);
+    gfx.setCursor(barX + barW + 8, y + 2);
+    gfx.print(extraInfo);
   }
 }
 
@@ -437,19 +568,39 @@ void drawBootScreen(const char *text) {
   } while (display.nextPage());
 }
 
+// หน้าจอเริ่มต้นของจอที่ 2 (Claude Code) รองรับข้อความ 2 บรรทัดคั่นด้วย '\n'
+void drawBootScreen2(const char *text) {
+  String t(text);
+  int nl = t.indexOf('\n');
+  display2.setFullWindow();
+  display2.firstPage();
+  do {
+    display2.fillScreen(GxEPD_WHITE);
+    display2.setFont(&FreeSans9pt7b);
+    display2.setTextColor(GxEPD_BLACK);
+    display2.setCursor(10, 55);
+    display2.print(nl < 0 ? t : t.substring(0, nl));
+    if (nl >= 0) {
+      display2.setCursor(10, 78);
+      display2.print(t.substring(nl + 1));
+    }
+  } while (display2.nextPage());
+  display2.powerOff();
+}
+
 // =========================================================================
 // ฟังก์ชันวาดไอคอน Wi-Fi สำหรับจอ E-ink
 // =========================================================================
-void drawWiFiIconEink(int x, int y) {
+void drawWiFiIconEink(Adafruit_GFX &gfx, int x, int y) {
   int cx = x + 8;
   int cy = y + 12;
 
-  display.drawCircle(cx, cy, 8, GxEPD_BLACK);
-  display.drawCircle(cx, cy, 5, GxEPD_BLACK);
-  display.fillCircle(cx, cy - 1, 2, GxEPD_BLACK);
+  gfx.drawCircle(cx, cy, 8, GxEPD_BLACK);
+  gfx.drawCircle(cx, cy, 5, GxEPD_BLACK);
+  gfx.fillCircle(cx, cy - 1, 2, GxEPD_BLACK);
 
   // ตัดครึ่งล่างทิ้งให้เป็นรูปพัดสัญญาณ
-  display.fillRect(x, cy - 2, 16, 12, GxEPD_WHITE);
-  display.fillTriangle(cx, cy, x, cy, x, cy - 9, GxEPD_WHITE);
-  display.fillTriangle(cx, cy, x + 16, cy, x + 16, cy - 9, GxEPD_WHITE);
+  gfx.fillRect(x, cy - 2, 16, 12, GxEPD_WHITE);
+  gfx.fillTriangle(cx, cy, x, cy, x, cy - 9, GxEPD_WHITE);
+  gfx.fillTriangle(cx, cy, x + 16, cy, x + 16, cy - 9, GxEPD_WHITE);
 }
