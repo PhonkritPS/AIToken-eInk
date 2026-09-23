@@ -27,6 +27,10 @@
 #define EPD_RST D4  // GPIO2
 #define EPD_BUSY D2 // GPIO4
 
+// ขาสำหรับจอที่ 2 (แชร์ DC, RST, SCL, SDI ร่วมกับจอแรก)
+#define EPD2_CS D1   // GPIO5
+#define EPD2_BUSY D6 // GPIO12
+
 // =========================================================================
 // เลือกรุ่นหน้าจอ E-ink (ปิดโหมด 3 สี เพื่อใช้จอ ขาว-ดำ รุ่นใหม่)
 // =========================================================================
@@ -50,12 +54,16 @@ GxEPD2_BW<GxEPD2_290, GxEPD2_290::HEIGHT>
     display(GxEPD2_290(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 #endif
 
+// จอที่ 2 (ขาว-ดำ 2.9")
+GxEPD2_BW<GxEPD2_290, GxEPD2_290::HEIGHT>
+    display2(GxEPD2_290(EPD2_CS, EPD_DC, EPD_RST, EPD2_BUSY));
+
 // Wi-Fi Config
-const char *ssid = "H101-2.4GHz";
-const char *password = "0817115775";
+const char *ssid = "IT-TEST";
+const char *password = "ilovephonkrit";
 
 // API Config
-const char *apiUrl = "http://192.168.10.25:5000/api/quota";
+const char *apiUrl = "http://172.100.2.122:5000/api/quota";
 const unsigned long refreshInterval = 60000; // เช็ค API ทุก 1 นาที
 unsigned long lastFetchTime = 0;
 
@@ -84,12 +92,32 @@ void drawWiFiIconEink(int x, int y);
 void setup() {
   Serial.begin(115200);
 
-  // 1. เริ่มการทำงานจอ E-ink
+  // ตั้งค่าขา CS ของทั้งสองจอให้เป็น HIGH ก่อน ป้องกันสัญญาณ SPI ชนกัน
+  pinMode(EPD_CS, OUTPUT);
+  digitalWrite(EPD_CS, HIGH);
+  pinMode(EPD2_CS, OUTPUT);
+  digitalWrite(EPD2_CS, HIGH);
+
+  // 1. เริ่มการทำงานจอ E-ink ตัวหลัก
   display.init(115200);
   display.setRotation(1); // แนวนอน 296 x 128
   display.setTextColor(GxEPD_BLACK);
 
-  // 2. แสดงหน้าจอเริ่มต้น
+  // 2. เริ่มการทำงานและแสดงข้อความบนจอที่ 2
+  display2.init(115200);
+  display2.setRotation(1); // แนวนอน 296 x 128
+  display2.setTextColor(GxEPD_BLACK);
+  display2.setFont(&FreeSansBold9pt7b);
+  display2.setFullWindow();
+  display2.firstPage();
+  do {
+    display2.fillScreen(GxEPD_WHITE);
+    display2.setCursor(45, 68);
+    display2.print("HELLO MONITOR 2");
+  } while (display2.nextPage());
+  display2.powerOff(); // พักหน้าจอหลังวาดเสร็จ
+
+  // 3. แสดงหน้าจอเริ่มต้นบนจอหลัก
   drawBootScreen("Connecting to Wi-Fi...");
 
   // 3. เชื่อมต่อ Wi-Fi
