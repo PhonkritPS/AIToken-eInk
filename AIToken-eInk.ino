@@ -108,12 +108,14 @@ void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
 void updateSingleBarPartial(int y, int h, int percent, const char *label,
                             const char *sub);
 void drawProgressBar(Adafruit_GFX &gfx, int x, int y, int w, int h,
-                     int percent, const char *label, const char *sub);
+                     int percent, const char *label, const char *sub,
+                     bool bold = false);
 void updateClaudeCodeDisplay(const ClaudeCodeData &cc);
 void drawClaudeCodeData(const ClaudeCodeData &cc);
 void drawTokenRow(Adafruit_GFX &gfx, int x, int y, const char *label,
                   const String &total, const String &in, const String &out,
                   const String &cache);
+void printBold(Adafruit_GFX &gfx, int x, int y, const String &text);
 void drawBootScreen(const char *text);
 void drawBootScreen2(const char *text);
 void drawWiFiIconEink(Adafruit_GFX &gfx, int x, int y);
@@ -452,13 +454,12 @@ void drawClaudeCodeData(const ClaudeCodeData &cc) {
   // --- Plan Limits Section ---
   display2.setFont();
   display2.setTextColor(GxEPD_BLACK);
-  display2.setCursor(5, 28);
-  display2.print("PLAN LIMITS");
+  printBold(display2, 5, 28, "PLAN LIMITS");
 
   drawProgressBar(display2, 5, 38, 280, 11, cc.weekly, "Weekly",
-                  cc.weeklySub.c_str());
+                  cc.weeklySub.c_str(), true);
   drawProgressBar(display2, 5, 54, 280, 11, cc.fiveHr, "5 Hour",
-                  cc.fiveHrSub.c_str());
+                  cc.fiveHrSub.c_str(), true);
 
   // เส้นคั่นกลาง
   display2.drawLine(5, 70, 291, 70, GxEPD_BLACK);
@@ -466,8 +467,7 @@ void drawClaudeCodeData(const ClaudeCodeData &cc) {
   // --- Tokens Section ---
   display2.setFont();
   display2.setTextColor(GxEPD_BLACK);
-  display2.setCursor(5, 80);
-  display2.print("TOKENS");
+  printBold(display2, 5, 80, "TOKENS");
 
   drawTokenRow(display2, 5, 90, "Today", cc.todayTotal, cc.todayIn,
                cc.todayOut, cc.todayCache);
@@ -475,26 +475,25 @@ void drawClaudeCodeData(const ClaudeCodeData &cc) {
                cc.windowOut, cc.windowCache);
 }
 
-// วาดแถว Token: ชื่อ | ยอดรวม | in / out / cache (ฟอนต์มาตรฐาน 6px ต่อตัวอักษร)
+// พิมพ์ข้อความแบบตัวหนาเทียม (วาดซ้ำเลื่อน 1px ไปทางขวา) สำหรับฟอนต์มาตรฐานที่เส้นบาง
+void printBold(Adafruit_GFX &gfx, int x, int y, const String &text) {
+  gfx.setCursor(x, y);
+  gfx.print(text);
+  gfx.setCursor(x + 1, y);
+  gfx.print(text);
+}
+
+// วาดแถว Token: ชื่อ | ยอดรวม | in / out / cache (ฟอนต์มาตรฐาน 6px ต่อตัวอักษร, ตัวหนาเทียม)
 void drawTokenRow(Adafruit_GFX &gfx, int x, int y, const char *label,
                   const String &total, const String &in, const String &out,
                   const String &cache) {
   gfx.setFont();
   gfx.setTextColor(GxEPD_BLACK);
 
-  gfx.setCursor(x, y + 2);
-  gfx.print(label);
-
-  gfx.setCursor(x + 44, y + 2);
-  gfx.print(total);
-
-  gfx.setCursor(x + 92, y + 2);
-  gfx.print("in ");
-  gfx.print(in);
-  gfx.print(" out ");
-  gfx.print(out);
-  gfx.print(" cache ");
-  gfx.print(cache);
+  printBold(gfx, x, y + 2, label);
+  printBold(gfx, x + 44, y + 2, total);
+  printBold(gfx, x + 92, y + 2,
+            "in " + in + " out " + out + " cache " + cache);
 }
 
 // =========================================================================
@@ -515,7 +514,8 @@ void updateSingleBarPartial(int y, int h, int percent, const char *label,
 // ฟังก์ชันวาดกราฟแท่ง (Progress Bar) พร้อมแสดง % และจำนวนวันที่เหลือ (สั้นลงเพื่อเว้นที่)
 // =========================================================================
 void drawProgressBar(Adafruit_GFX &gfx, int x, int y, int w, int h,
-                     int percent, const char *label, const char *extraInfo) {
+                     int percent, const char *label, const char *extraInfo,
+                     bool bold) {
 #ifdef USE_3COLOR_DISPLAY
   uint16_t color = (percent < 10) ? GxEPD_RED : GxEPD_BLACK;
 #else
@@ -526,13 +526,17 @@ void drawProgressBar(Adafruit_GFX &gfx, int x, int y, int w, int h,
   gfx.setTextColor(color);
 
   // 1. พิมพ์ Label (เช่น Weekly, 5 Hour)
-  gfx.setCursor(x, y + 2);
-  gfx.print(label);
-
   // 2. พิมพ์ตัวเลขเปอร์เซ็นต์
-  gfx.setCursor(x + 44, y + 2);
-  gfx.print(percent);
-  gfx.print("%");
+  if (bold) {
+    printBold(gfx, x, y + 2, label);
+    printBold(gfx, x + 44, y + 2, String(percent) + "%");
+  } else {
+    gfx.setCursor(x, y + 2);
+    gfx.print(label);
+    gfx.setCursor(x + 44, y + 2);
+    gfx.print(percent);
+    gfx.print("%");
+  }
 
   // 3. วาดกรอบสี่เหลี่ยมของแถบบาร์ (ปรับความกว้างเป็น 130px เพื่อให้มีพื้นที่เหลือทางขวาสำหรับ
   // Subtext)
@@ -548,8 +552,12 @@ void drawProgressBar(Adafruit_GFX &gfx, int x, int y, int w, int h,
 
   // 5. แสดงข้อความจำนวนวันที่เหลือ / เวลาที่เหลือ (ทางขวาของแถบบาร์)
   if (extraInfo != nullptr && strlen(extraInfo) > 0) {
-    gfx.setCursor(barX + barW + 8, y + 2);
-    gfx.print(extraInfo);
+    if (bold) {
+      printBold(gfx, barX + barW + 8, y + 2, extraInfo);
+    } else {
+      gfx.setCursor(barX + barW + 8, y + 2);
+      gfx.print(extraInfo);
+    }
   }
 }
 
