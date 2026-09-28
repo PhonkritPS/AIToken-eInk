@@ -86,6 +86,10 @@ struct ClaudeCodeData {
   String fiveHrSub;
   String todayTotal, todayIn, todayOut, todayCache;
   String windowTotal, windowIn, windowOut, windowCache;
+  bool rateLimited = false;   // โดน 429 จาก Anthropic API อยู่หรือไม่ (มีผลกับการ refresh จอ)
+  String rateLimitReset = ""; // เวลาที่เหลือก่อนปลดล็อก เช่น "5m"
+  String lastUpdated = "";    // เวลาที่ bridge ดึงข้อมูล Claude Code สำเร็จล่าสุด (ไม่รวมใน operator!=
+                               // เพราะไม่อยากให้จอ refresh ทุกครั้งที่แค่เวลาขยับแต่ตัวเลขเดิม)
 
   bool operator!=(const ClaudeCodeData &o) const {
     return weekly != o.weekly || fiveHr != o.fiveHr ||
@@ -93,7 +97,8 @@ struct ClaudeCodeData {
            todayTotal != o.todayTotal || todayIn != o.todayIn ||
            todayOut != o.todayOut || todayCache != o.todayCache ||
            windowTotal != o.windowTotal || windowIn != o.windowIn ||
-           windowOut != o.windowOut || windowCache != o.windowCache;
+           windowOut != o.windowOut || windowCache != o.windowCache ||
+           rateLimited != o.rateLimited || rateLimitReset != o.rateLimitReset;
   }
 };
 ClaudeCodeData prevCc = {-1, -1};
@@ -104,7 +109,8 @@ const int fullRefreshEvery2 = 30; // Full Refresh ทุกๆ 30 ครั้�
 // Prototype functions
 void fetchAndDisplayQuota();
 void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
-                       String g5Sub, String cwSub, String c5Sub);
+                       String g5Sub, String cwSub, String c5Sub,
+                       String lastUpdated);
 void updateSingleBarPartial(int y, int h, int percent, const char *label,
                             const char *sub);
 void drawProgressBar(Adafruit_GFX &gfx, int x, int y, int w, int h,
@@ -116,6 +122,10 @@ void drawTokenRow(Adafruit_GFX &gfx, int x, int y, const char *label,
                   const String &total, const String &in, const String &out,
                   const String &cache);
 void printBold(Adafruit_GFX &gfx, int x, int y, const String &text);
+void drawRightAlignedTime(Adafruit_GFX &gfx, int rightEdge, int y,
+                          const String &t);
+void drawRateLimitBanner(Adafruit_GFX &gfx, int x, int y,
+                         const String &resetText);
 void drawBootScreen(const char *text);
 void drawBootScreen2(const char *text);
 void drawWiFiIconEink(Adafruit_GFX &gfx, int x, int y);
@@ -260,12 +270,15 @@ void fetchAndDisplayQuota() {
                         (g5Sub != prevG5Time) || (cwSub != prevCwTime) ||
                         (c5Sub != prevC5Time);
 
+      // เวลาที่ bridge ดึงข้อมูล Antigravity สำเร็จล่าสุด (โชว์ต่อท้ายหัวข้อ GEMINI MODELS)
+      String lastUpdated = doc["lastUpdated"] | "";
+
       if (hasChanged) {
         Serial.println("[INFO] Data changed -> Updating display...");
         Serial.println("  gwSub=[" + gwSub + "] g5Sub=[" + g5Sub + "] cwSub=[" +
                        cwSub + "] c5Sub=[" + c5Sub + "]");
         updateEinkDisplay(geminiWeekly, gemini5Hr, claudeWeekly, claude5Hr,
-                          gwSub, g5Sub, cwSub, c5Sub);
+                          gwSub, g5Sub, cwSub, c5Sub, lastUpdated);
       } else {
         Serial.println("[INFO] Data unchanged -> Skipping display update.");
       }
@@ -284,6 +297,9 @@ void fetchAndDisplayQuota() {
       cc.windowIn = doc["ccWindowIn"] | "0";
       cc.windowOut = doc["ccWindowOut"] | "0";
       cc.windowCache = doc["ccWindowCache"] | "0";
+      cc.rateLimited = doc["ccRateLimited"] | false;
+      cc.rateLimitReset = doc["ccRateLimitReset"] | "";
+      cc.lastUpdated = doc["ccLastUpdated"] | "";
 
       if (isFirstRender2 || cc != prevCc) {
         Serial.println("[INFO] Claude Code data changed -> Updating display2...");
@@ -303,7 +319,8 @@ void fetchAndDisplayQuota() {
 // ฟังก์ชันจัดการแสดงผลหน้าจอ E-ink
 // =========================================================================
 void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
-                       String g5Sub, String cwSub, String c5Sub) {
+                       String g5Sub, String cwSub, String c5Sub,
+                       String lastUpdated) {
   if (isFirstRender) {
     // วาดเทมเพลตและข้อมูลทั้งหมดในรอบแรก (Full Window Refresh)
     display.setFullWindow();
@@ -325,6 +342,7 @@ void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
       display.setTextColor(GxEPD_BLACK);
       display.setCursor(5, 28);
       display.print("GEMINI MODELS");
+      drawRightAlignedTime(display, 291, 28, lastUpdated);
 
       drawProgressBar(display, 5, 38, 280, 11, gw, "Weekly", gwSub.c_str());
       drawProgressBar(display, 5, 54, 280, 11, g5, "5 Hour", g5Sub.c_str());
@@ -381,6 +399,7 @@ void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
         display.setTextColor(GxEPD_BLACK);
         display.setCursor(5, 28);
         display.print("GEMINI MODELS");
+        drawRightAlignedTime(display, 291, 28, lastUpdated);
         drawProgressBar(display, 5, 38, 280, 11, gw, "Weekly", gwSub.c_str());
         drawProgressBar(display, 5, 54, 280, 11, g5, "5 Hour", g5Sub.c_str());
 
@@ -455,6 +474,11 @@ void drawClaudeCodeData(const ClaudeCodeData &cc) {
   display2.setFont();
   display2.setTextColor(GxEPD_BLACK);
   printBold(display2, 5, 28, "PLAN LIMITS");
+  if (cc.rateLimited) {
+    // โดน 429 จาก Anthropic API: ขึ้นแถบดำ-ตัวหนังสือขาวให้เห็นชัด (จอนี้เป็นขาว-ดำล้วน)
+    drawRateLimitBanner(display2, 80, 26, cc.rateLimitReset);
+  }
+  drawRightAlignedTime(display2, 291, 28, cc.lastUpdated);
 
   drawProgressBar(display2, 5, 38, 280, 11, cc.weekly, "Weekly",
                   cc.weeklySub.c_str(), true);
@@ -594,6 +618,38 @@ void drawBootScreen2(const char *text) {
     }
   } while (display2.nextPage());
   display2.powerOff();
+}
+
+// =========================================================================
+// ข้อความเวลาอัปเดตล่าสุด ชิดขวาบนแถวหัวข้อ section (เช่น "GEMINI MODELS", "PLAN LIMITS")
+// ใช้ฟอนต์มาตรฐาน (6px ต่อตัวอักษร) คำนวณตำแหน่ง x จากความยาวข้อความเอง
+// =========================================================================
+void drawRightAlignedTime(Adafruit_GFX &gfx, int rightEdge, int y,
+                          const String &t) {
+  if (t.length() == 0)
+    return;
+  gfx.setFont();
+  gfx.setTextColor(GxEPD_BLACK);
+  int x = rightEdge - (int)t.length() * 6;
+  gfx.setCursor(x, y);
+  gfx.print(t);
+}
+
+// =========================================================================
+// แถบเตือนโดน 429 Rate Limit: พื้นดำ-ตัวหนังสือขาว ให้เห็นชัดแม้บนจอขาว-ดำล้วน
+// =========================================================================
+void drawRateLimitBanner(Adafruit_GFX &gfx, int x, int y,
+                         const String &resetText) {
+  String msg = "RATE LIMIT " + resetText;
+  int boxW = (int)msg.length() * 6 + 8;
+  int boxH = 11;
+
+  gfx.fillRect(x, y, boxW, boxH, GxEPD_BLACK);
+  gfx.setFont();
+  gfx.setTextColor(GxEPD_WHITE);
+  gfx.setCursor(x + 4, y + 2);
+  gfx.print(msg);
+  gfx.setTextColor(GxEPD_BLACK); // คืนค่าสีเริ่มต้นให้โค้ดถัดไปที่จะวาดต่อ
 }
 
 // =========================================================================
