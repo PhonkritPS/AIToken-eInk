@@ -37,8 +37,7 @@
 // #define USE_3COLOR_DISPLAY  // <--- คอมเมนต์บรรทัดนี้ไว้เพื่อใช้จอ ขาว-ดำ
 
 #ifndef GxEPD_RED
-#define GxEPD_RED                                                              \
-  0xF800 // แม้เป็นจอขาว-ดำ ก็ประกาศเผื่อไว้กัน Error จากฟังก์ชันที่เรียกใช้สีแดง
+#define GxEPD_RED 0xF800 // แม้เป็นจอขาว-ดำ ก็ประกาศเผื่อไว้กัน Error
 #endif
 
 #ifdef USE_3COLOR_DISPLAY
@@ -48,8 +47,7 @@ GxEPD2_3C<GxEPD2_290_C90c, GxEPD2_290_C90c::HEIGHT>
     display(GxEPD2_290_C90c(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 #else
 #include <GxEPD2_BW.h>
-// จอ 2.9" ขาว-ดำ สำหรับสายแพร E029A01 (E029A01-FPCA-V2.0 / E029A01N16C810 -> ชิป
-// SSD1608 / GDEH029A1)
+// จอ 2.9" ขาว-ดำ สำหรับสายแพร E029A01 (ชิป SSD1608 / GDEH029A1)
 GxEPD2_BW<GxEPD2_290, GxEPD2_290::HEIGHT>
     display(GxEPD2_290(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 #endif
@@ -58,7 +56,9 @@ GxEPD2_BW<GxEPD2_290, GxEPD2_290::HEIGHT>
 GxEPD2_BW<GxEPD2_290, GxEPD2_290::HEIGHT>
     display2(GxEPD2_290(EPD2_CS, EPD_DC, EPD_RST, EPD2_BUSY));
 
-// Wi-Fi Config
+// =========================================================================
+// การตั้งค่า Wi-Fi และ API
+// =========================================================================
 const char *ssid = "IT-TEST";
 const char *password = "ilovephonkrit";
 
@@ -67,69 +67,125 @@ const char *apiUrl = "http://172.100.2.122:5000/api/quota";
 const unsigned long refreshInterval = 60000; // เช็ค API ทุก 1 นาที
 unsigned long lastFetchTime = 0;
 
-// ตัวแปรเก็บค่าเดิม เพื่อเช็คว่าข้อมูลเปลี่ยนหรือไม่
-int prevGeminiWeekly = -1;
-int prevGemini5Hr = -1;
-int prevClaudeWeekly = -1;
-int prevClaude5Hr = -1;
-String prevGwTime = "";
-String prevG5Time = "";
-String prevCwTime = "";
-String prevC5Time = "";
-bool isFirstRender = true;
+const int fullRefreshEvery = 30; // Full Refresh ทุกๆ 30 ครั้งเพื่อล้าง ghosting
 
-// ตัวแปรเก็บค่าเดิมของจอที่ 2 (Claude Code)
+// =========================================================================
+// โครงสร้างข้อมูลแต่ละบริการ และสถานะก่อนหน้าเพื่อเช็คการเปลี่ยนแปลง
+// =========================================================================
+// จอ 1: Antigravity IDE
+struct AntigravityData {
+  int geminiWeekly = 100;
+  int gemini5Hr = 100;
+  int claudeWeekly = 100;
+  int claude5Hr = 100;
+  String geminiWeeklyReset = "";
+  String gemini5HrReset = "";
+  String claudeWeeklyReset = "";
+  String claude5HrReset = "";
+  String lastUpdated = "";
+
+  bool operator!=(const AntigravityData &o) const {
+    return geminiWeekly != o.geminiWeekly || gemini5Hr != o.gemini5Hr ||
+           claudeWeekly != o.claudeWeekly || claude5Hr != o.claude5Hr ||
+           geminiWeeklyReset != o.geminiWeeklyReset ||
+           gemini5HrReset != o.gemini5HrReset ||
+           claudeWeeklyReset != o.claudeWeeklyReset ||
+           claude5HrReset != o.claude5HrReset;
+  }
+};
+
+// จอ 1: Spark Local AI (Ollama & Hardware Telemetry)
+struct SparkData {
+  bool connected = false;
+  String model = "Local AI";
+  String status = "Offline";
+  int cpu = 0;
+  int ram = 0;
+  String ramRatio = "0G/0G";
+  String totalTokens = "0";
+  String todayTokens = "0";
+  String savedCost = "$0";
+  String speed = "";
+  String lastUpdated = "";
+
+  bool operator!=(const SparkData &o) const {
+    return connected != o.connected || model != o.model ||
+           status != o.status || cpu != o.cpu || ram != o.ram ||
+           ramRatio != o.ramRatio || totalTokens != o.totalTokens ||
+           todayTokens != o.todayTokens || speed != o.speed;
+  }
+};
+
+// จอ 2: Claude Code CLI
 struct ClaudeCodeData {
-  int weekly;
-  int fiveHr;
-  String weeklySub;
-  String fiveHrSub;
-  String todayTotal, todayIn, todayOut, todayCache;
-  String windowTotal, windowIn, windowOut, windowCache;
-  bool rateLimited = false;   // โดน 429 จาก Anthropic API อยู่หรือไม่ (มีผลกับการ refresh จอ)
-  String rateLimitReset = ""; // เวลาที่เหลือก่อนปลดล็อก เช่น "5m"
-  String lastUpdated = "";    // เวลาที่ bridge ดึงข้อมูล Claude Code สำเร็จล่าสุด (ไม่รวมใน operator!=
-                               // เพราะไม่อยากให้จอ refresh ทุกครั้งที่แค่เวลาขยับแต่ตัวเลขเดิม)
+  int weekly = 100;
+  int fiveHr = 100;
+  String weeklySub = "";
+  String fiveHrSub = "";
+  String todayTotal = "0";
+  String todayCache = "0";
+  String windowTotal = "0";
+  String windowCache = "0";
+  bool rateLimited = false;
+  String rateLimitReset = "";
+  String lastUpdated = "";
 
   bool operator!=(const ClaudeCodeData &o) const {
     return weekly != o.weekly || fiveHr != o.fiveHr ||
            weeklySub != o.weeklySub || fiveHrSub != o.fiveHrSub ||
-           todayTotal != o.todayTotal || todayIn != o.todayIn ||
-           todayOut != o.todayOut || todayCache != o.todayCache ||
-           windowTotal != o.windowTotal || windowIn != o.windowIn ||
-           windowOut != o.windowOut || windowCache != o.windowCache ||
+           todayTotal != o.todayTotal || todayCache != o.todayCache ||
+           windowTotal != o.windowTotal || windowCache != o.windowCache ||
            rateLimited != o.rateLimited || rateLimitReset != o.rateLimitReset;
   }
 };
-ClaudeCodeData prevCc = {-1, -1};
+
+// จอ 2: OpenAI Codex CLI
+struct CodexData {
+  bool connected = false;
+  String planType = "";
+  int primaryPercent = -1;
+  String primaryReset = "";
+  int secondaryPercent = -1;
+  String secondaryReset = "";
+  bool rateLimited = false;
+  String rateLimitReset = "";
+  String lastUpdated = "";
+
+  bool operator!=(const CodexData &o) const {
+    return connected != o.connected || planType != o.planType ||
+           primaryPercent != o.primaryPercent || primaryReset != o.primaryReset ||
+           secondaryPercent != o.secondaryPercent ||
+           secondaryReset != o.secondaryReset ||
+           rateLimited != o.rateLimited || rateLimitReset != o.rateLimitReset;
+  }
+};
+
+AntigravityData prevAg;
+SparkData prevSpark;
+ClaudeCodeData prevCc;
+CodexData prevCodex;
+
+bool isFirstRender1 = true;
 bool isFirstRender2 = true;
+int partialCount1 = 0;
 int partialCount2 = 0;
-const int fullRefreshEvery2 = 30; // Full Refresh ทุกๆ 30 ครั้ง ลดภาพเงาค้างบนจอ E-ink
 
 // Prototype functions
 void fetchAndDisplayQuota();
-void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
-                       String g5Sub, String cwSub, String c5Sub,
-                       String lastUpdated);
-void updateSingleBarPartial(int y, int h, int percent, const char *label,
-                            const char *sub);
-void drawProgressBar(Adafruit_GFX &gfx, int x, int y, int w, int h,
-                     int percent, const char *label, const char *sub,
-                     bool bold = false);
-void updateClaudeCodeDisplay(const ClaudeCodeData &cc);
-void drawClaudeCodeData(const ClaudeCodeData &cc);
-void drawTokenRow(Adafruit_GFX &gfx, int x, int y, const char *label,
-                  const String &total, const String &in, const String &out,
-                  const String &cache);
+void updateDisplay1(const AntigravityData &ag, const SparkData &spark);
+void drawDisplay1Data(const AntigravityData &ag, const SparkData &spark);
+void updateDisplay2(const ClaudeCodeData &cc, const CodexData &codex);
+void drawDisplay2Data(const ClaudeCodeData &cc, const CodexData &codex);
+void drawMiniBar(Adafruit_GFX &gfx, int x, int y, int w, int h, int percent);
 void printBold(Adafruit_GFX &gfx, int x, int y, const String &text);
-void drawRightAlignedTime(Adafruit_GFX &gfx, int rightEdge, int y,
-                          const String &t);
-void drawRateLimitBanner(Adafruit_GFX &gfx, int x, int y,
-                         const String &resetText);
+void drawRateLimitBanner(Adafruit_GFX &gfx, int x, int y, const String &resetText);
+void drawWiFiIconEink(Adafruit_GFX &gfx, int x, int y);
 void drawBootScreen(const char *text);
 void drawBootScreen2(const char *text);
-void drawWiFiIconEink(Adafruit_GFX &gfx, int x, int y);
 
+// =========================================================================
+// Setup
+// =========================================================================
 void setup() {
   Serial.begin(115200);
 
@@ -139,19 +195,18 @@ void setup() {
   pinMode(EPD2_CS, OUTPUT);
   digitalWrite(EPD2_CS, HIGH);
 
-  // 1. เริ่มการทำงานจอ E-ink ตัวหลัก
+  // 1. เริ่มการทำงานจอที่ 1 (Antigravity + SPARK Local)
   display.init(115200);
   display.setRotation(1); // แนวนอน 296 x 128
   display.setTextColor(GxEPD_BLACK);
 
-  // 2. เริ่มการทำงานจอที่ 2 (แสดงข้อมูล Claude Code)
+  // 2. เริ่มการทำงานจอที่ 2 (Claude Code + Codex)
   display2.init(115200);
   display2.setRotation(1); // แนวนอน 296 x 128
   display2.setTextColor(GxEPD_BLACK);
-  drawBootScreen2("Claude Code\nWaiting for data...");
 
-  // 3. แสดงหน้าจอเริ่มต้นบนจอหลัก
-  drawBootScreen("Connecting to Wi-Fi...");
+  drawBootScreen2("CLI Monitor\nClaude Code & Codex");
+  drawBootScreen("AIToken Monitor\nConnecting to Wi-Fi...");
 
   // 3. เชื่อมต่อ Wi-Fi
   WiFi.mode(WIFI_STA);
@@ -167,10 +222,10 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     String mac = WiFi.macAddress();
     Serial.println("\nWiFi Connected! MAC: " + mac);
-    drawBootScreen("WiFi Connected!\nFetching Data...");
+    drawBootScreen("WiFi Connected!\nFetching Quota...");
     fetchAndDisplayQuota(); // โหลดข้อมูลทันที
   } else {
-    drawBootScreen("WiFi Failed.\nPlease Check SSID/Pass");
+    drawBootScreen("WiFi Failed.\nPlease Check Network");
   }
 }
 
@@ -201,305 +256,403 @@ void fetchAndDisplayQuota() {
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
 
-    // รองรับ ArduinoJson v7
+    // รองรับ ArduinoJson v7 / v6
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload);
 
     if (!error) {
-      int geminiWeekly = doc["geminiWeekly"] | 100;
-      int gemini5Hr = doc["gemini5Hr"] | 100;
-      int claudeWeekly = doc["claudeWeekly"] | 100;
-      int claude5Hr = doc["claude5Hr"] | 100;
-
-      // ดึง Subtext (รองรับหลายรูปแบบกรณี API ส่งมาต่างกัน)
-      String gwSub = "";
-      if (doc.containsKey("geminiWeeklySubtext") &&
-          !doc["geminiWeeklySubtext"].isNull())
-        gwSub = doc["geminiWeeklySubtext"].as<String>();
-      else if (doc.containsKey("geminiWeeklyReset"))
-        gwSub = doc["geminiWeeklyReset"].as<String>();
-      else if (doc.containsKey("geminiWeeklyDays"))
-        gwSub = doc["geminiWeeklyDays"].as<String>() + "d";
-
-      String g5Sub = "";
-      if (doc.containsKey("gemini5HrSubtext") &&
-          !doc["gemini5HrSubtext"].isNull())
-        g5Sub = doc["gemini5HrSubtext"].as<String>();
-      else if (doc.containsKey("gemini5HrReset"))
-        g5Sub = doc["gemini5HrReset"].as<String>();
-
-      String cwSub = "";
-      if (doc.containsKey("claudeWeeklySubtext") &&
-          !doc["claudeWeeklySubtext"].isNull())
-        cwSub = doc["claudeWeeklySubtext"].as<String>();
-      else if (doc.containsKey("claudeWeeklyReset"))
-        cwSub = doc["claudeWeeklyReset"].as<String>();
-      else if (doc.containsKey("claudeWeeklyDays"))
-        cwSub = doc["claudeWeeklyDays"].as<String>() + "d";
-
-      String c5Sub = "";
-      if (doc.containsKey("claude5HrSubtext") &&
-          !doc["claude5HrSubtext"].isNull())
-        c5Sub = doc["claude5HrSubtext"].as<String>();
-      else if (doc.containsKey("claude5HrReset"))
-        c5Sub = doc["claude5HrReset"].as<String>();
-
-      // ย่อข้อความให้สั้นกระชับพอดีกับจอ 2.9" (เช่น "Resets in 5 days" -> "5d left")
       auto formatSubtext = [](String s) -> String {
         s.trim();
-        if (s.equalsIgnoreCase("null"))
-          return "";
+        if (s.equalsIgnoreCase("null")) return "";
         s.replace("Resets in ", "");
         s.replace(" days", "d");
         s.replace(" day", "d");
         s.replace(" hours", "h");
         s.replace(" hour", "h");
+        s.replace(" minutes", "m");
+        s.replace(" minute", "m");
         return s;
       };
 
-      gwSub = formatSubtext(gwSub);
-      g5Sub = formatSubtext(g5Sub);
-      cwSub = formatSubtext(cwSub);
-      c5Sub = formatSubtext(c5Sub);
+      // -------------------------------------------------------------
+      // 1. Antigravity IDE (Gemini & Claude/GPT)
+      // -------------------------------------------------------------
+      AntigravityData ag;
+      ag.geminiWeekly = doc["geminiWeekly"] | 100;
+      ag.gemini5Hr = doc["gemini5Hr"] | 100;
+      ag.claudeWeekly = doc["claudeWeekly"] | 100;
+      ag.claude5Hr = doc["claude5Hr"] | 100;
 
-      // ตรวจสอบว่ามีข้อมูลใดเปลี่ยนไปจากเดิมหรือไม่
-      bool hasChanged = isFirstRender || (geminiWeekly != prevGeminiWeekly) ||
-                        (gemini5Hr != prevGemini5Hr) ||
-                        (claudeWeekly != prevClaudeWeekly) ||
-                        (claude5Hr != prevClaude5Hr) || (gwSub != prevGwTime) ||
-                        (g5Sub != prevG5Time) || (cwSub != prevCwTime) ||
-                        (c5Sub != prevC5Time);
+      String gwSub = doc["geminiWeeklyReset"] | doc["geminiWeeklySubtext"] | "";
+      String g5Sub = doc["gemini5HrReset"] | doc["gemini5HrSubtext"] | "";
+      String cwSub = doc["claudeWeeklyReset"] | doc["claudeWeeklySubtext"] | "";
+      String c5Sub = doc["claude5HrReset"] | doc["claude5HrSubtext"] | "";
 
-      // เวลาที่ bridge ดึงข้อมูล Antigravity สำเร็จล่าสุด (โชว์ต่อท้ายหัวข้อ GEMINI MODELS)
-      String lastUpdated = doc["lastUpdated"] | "";
+      ag.geminiWeeklyReset = formatSubtext(gwSub);
+      ag.gemini5HrReset = formatSubtext(g5Sub);
+      ag.claudeWeeklyReset = formatSubtext(cwSub);
+      ag.claude5HrReset = formatSubtext(c5Sub);
+      ag.lastUpdated = doc["lastUpdated"] | "";
 
-      if (hasChanged) {
-        Serial.println("[INFO] Data changed -> Updating display...");
-        Serial.println("  gwSub=[" + gwSub + "] g5Sub=[" + g5Sub + "] cwSub=[" +
-                       cwSub + "] c5Sub=[" + c5Sub + "]");
-        updateEinkDisplay(geminiWeekly, gemini5Hr, claudeWeekly, claude5Hr,
-                          gwSub, g5Sub, cwSub, c5Sub, lastUpdated);
-      } else {
-        Serial.println("[INFO] Data unchanged -> Skipping display update.");
-      }
+      // -------------------------------------------------------------
+      // 2. SPARK Local AI
+      // -------------------------------------------------------------
+      SparkData spark;
+      spark.connected = doc["sparkConnected"] | false;
+      spark.model = doc["sparkModel"] | "Local AI";
+      spark.status = doc["sparkStatus"] | "Offline";
+      spark.cpu = doc["sparkCpu"] | 0;
+      spark.ram = doc["sparkRam"] | 0;
+      spark.ramRatio = doc["sparkRamRatio"] | "0G/0G";
+      spark.totalTokens = doc["sparkTotalTokens"] | "0";
+      spark.todayTokens = doc["sparkTodayTokens"] | "0";
+      spark.savedCost = doc["sparkSavedCost"] | "$0";
+      spark.speed = doc["sparkSpeed"] | "";
+      spark.lastUpdated = doc["sparkLastUpdated"] | "";
 
-      // --- จอที่ 2: Claude Code (ใช้ฟิลด์ cc* จาก bridge_server.js ตัวเดียวกัน) ---
+      // -------------------------------------------------------------
+      // 3. Claude Code CLI
+      // -------------------------------------------------------------
       ClaudeCodeData cc;
       cc.weekly = doc["ccWeekly"] | 100;
       cc.fiveHr = doc["cc5Hr"] | 100;
-      cc.weeklySub = doc["ccWeeklyReset"] | ""; // แบบสั้น เช่น "2d 16h"
-      cc.fiveHrSub = doc["cc5HrReset"] | "";
+      cc.weeklySub = formatSubtext(doc["ccWeeklyReset"] | doc["ccWeeklySubtext"] | "");
+      cc.fiveHrSub = formatSubtext(doc["cc5HrReset"] | doc["cc5HrSubtext"] | "");
       cc.todayTotal = doc["ccTodayTokens"] | "0";
-      cc.todayIn = doc["ccTodayIn"] | "0";
-      cc.todayOut = doc["ccTodayOut"] | "0";
       cc.todayCache = doc["ccTodayCache"] | "0";
       cc.windowTotal = doc["ccWindowTokens"] | "0";
-      cc.windowIn = doc["ccWindowIn"] | "0";
-      cc.windowOut = doc["ccWindowOut"] | "0";
       cc.windowCache = doc["ccWindowCache"] | "0";
       cc.rateLimited = doc["ccRateLimited"] | false;
       cc.rateLimitReset = doc["ccRateLimitReset"] | "";
       cc.lastUpdated = doc["ccLastUpdated"] | "";
 
-      if (isFirstRender2 || cc != prevCc) {
-        Serial.println("[INFO] Claude Code data changed -> Updating display2...");
-        updateClaudeCodeDisplay(cc);
+      // -------------------------------------------------------------
+      // 4. OpenAI Codex CLI
+      // -------------------------------------------------------------
+      CodexData codex;
+      codex.connected = doc["codexConnected"] | false;
+      codex.planType = doc["codexPlanType"] | "";
+      codex.primaryPercent = doc["codexPrimaryPercent"] | -1;
+      codex.primaryReset = formatSubtext(doc["codexPrimaryReset"] | "");
+      codex.secondaryPercent = doc["codexSecondaryPercent"] | -1;
+      codex.secondaryReset = formatSubtext(doc["codexSecondaryReset"] | "");
+      codex.rateLimited = doc["codexRateLimited"] | false;
+      codex.rateLimitReset = doc["codexRateLimitReset"] | "";
+      codex.lastUpdated = doc["codexLastUpdated"] | "";
+
+      // -------------------------------------------------------------
+      // ตรวจสอบการอัปเดตของแต่ละหน้าจอ
+      // -------------------------------------------------------------
+      bool disp1Changed = isFirstRender1 || (ag != prevAg) || (spark != prevSpark);
+      if (disp1Changed) {
+        Serial.println("[INFO] Display 1 (Antigravity & SPARK) data changed -> updating...");
+        updateDisplay1(ag, spark);
+      } else {
+        Serial.println("[INFO] Display 1 data unchanged.");
       }
+
+      bool disp2Changed = isFirstRender2 || (cc != prevCc) || (codex != prevCodex);
+      if (disp2Changed) {
+        Serial.println("[INFO] Display 2 (Claude Code & Codex) data changed -> updating...");
+        updateDisplay2(cc, codex);
+      } else {
+        Serial.println("[INFO] Display 2 data unchanged.");
+      }
+
     } else {
-      Serial.println("[ERROR] JSON Parse error");
+      Serial.print("[ERROR] JSON Parse error: ");
+      Serial.println(error.c_str());
     }
   } else {
-    Serial.printf("[ERROR] HTTP GET failed: %s\n",
-                  http.errorToString(httpCode).c_str());
+    Serial.printf("[ERROR] HTTP GET failed: %s (code: %d)\n",
+                  http.errorToString(httpCode).c_str(), httpCode);
   }
   http.end();
 }
 
 // =========================================================================
-// ฟังก์ชันจัดการแสดงผลหน้าจอ E-ink
+// จอที่ 1: ANTIGRAVITY & SPARK LOCAL (การ์ดกรอบมุมมน 2 ช่อง)
 // =========================================================================
-void updateEinkDisplay(int gw, int g5, int cw, int c5, String gwSub,
-                       String g5Sub, String cwSub, String c5Sub,
-                       String lastUpdated) {
-  if (isFirstRender) {
-    // วาดเทมเพลตและข้อมูลทั้งหมดในรอบแรก (Full Window Refresh)
+void updateDisplay1(const AntigravityData &ag, const SparkData &spark) {
+  bool doFull = isFirstRender1 || partialCount1 >= fullRefreshEvery;
+
+  if (doFull) {
     display.setFullWindow();
     display.firstPage();
     do {
-      display.fillScreen(GxEPD_WHITE); // พื้นหลังสีขาว
-
-      // --- Header ---
-      display.setFont(&FreeSansBold9pt7b);
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(5, 18);
-      display.print("Antigravity IDE Quota");
-
-      // เส้นคั่น Header
-      display.drawLine(5, 23, 291, 23, GxEPD_BLACK);
-
-      // --- Gemini Section ---
-      display.setFont(); // ฟอนต์มาตรฐาน
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(5, 28);
-      display.print("GEMINI MODELS");
-      drawRightAlignedTime(display, 291, 28, lastUpdated);
-
-      drawProgressBar(display, 5, 38, 280, 11, gw, "Weekly", gwSub.c_str());
-      drawProgressBar(display, 5, 54, 280, 11, g5, "5 Hour", g5Sub.c_str());
-
-      // เส้นคั่นกลาง
-      display.drawLine(5, 70, 291, 70, GxEPD_BLACK);
-
-      // --- Claude Section ---
-      display.setFont();
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(5, 80);
-      display.print("CLAUDE & GPT MODELS");
-
-      drawProgressBar(display, 5, 90, 280, 11, cw, "Weekly", cwSub.c_str());
-      drawProgressBar(display, 5, 106, 280, 11, c5, "5 Hour", c5Sub.c_str());
-
-      // ไอคอน Wi-Fi มุมขวาบน
-      drawWiFiIconEink(display, 275, 5);
-
+      display.fillScreen(GxEPD_WHITE);
+      drawDisplay1Data(ag, spark);
     } while (display.nextPage());
-
-    isFirstRender = false;
+    isFirstRender1 = false;
+    partialCount1 = 0;
   } else {
-    // นับจำนวนแถบที่ค่าเปลี่ยน
-    int changeCount = 0;
-    if (gw != prevGeminiWeekly || gwSub != prevGwTime)
-      changeCount++;
-    if (g5 != prevGemini5Hr || g5Sub != prevG5Time)
-      changeCount++;
-    if (cw != prevClaudeWeekly || cwSub != prevCwTime)
-      changeCount++;
-    if (c5 != prevClaude5Hr || c5Sub != prevC5Time)
-      changeCount++;
+    display.setPartialWindow(0, 0, display.width(), display.height());
+    display.firstPage();
+    do {
+      display.fillRect(0, 0, display.width(), display.height(), GxEPD_WHITE);
+      drawDisplay1Data(ag, spark);
+    } while (display.nextPage());
+    partialCount1++;
+  }
+  display.powerOff();
 
-    if (changeCount == 1) {
-      // เปลี่ยนแค่ 1 ค่า -> Partial Refresh เฉพาะแถวนั้น
-      if (gw != prevGeminiWeekly || gwSub != prevGwTime)
-        updateSingleBarPartial(36, 16, gw, "Weekly", gwSub.c_str());
-      if (g5 != prevGemini5Hr || g5Sub != prevG5Time)
-        updateSingleBarPartial(52, 16, g5, "5 Hour", g5Sub.c_str());
-      if (cw != prevClaudeWeekly || cwSub != prevCwTime)
-        updateSingleBarPartial(88, 16, cw, "Weekly", cwSub.c_str());
-      if (c5 != prevClaude5Hr || c5Sub != prevC5Time)
-        updateSingleBarPartial(104, 16, c5, "5 Hour", c5Sub.c_str());
-    } else if (changeCount > 1) {
-      // เปลี่ยนหลายค่าพร้อมกัน -> Partial Refresh รวมโซนข้อมูลในรอบเดียว
-      display.setPartialWindow(0, 26, display.width(), 98);
-      display.firstPage();
-      do {
-        display.fillRect(0, 26, display.width(), 98, GxEPD_WHITE);
+  prevAg = ag;
+  prevSpark = spark;
+}
 
-        // Gemini Section
-        display.setFont();
-        display.setTextColor(GxEPD_BLACK);
-        display.setCursor(5, 28);
-        display.print("GEMINI MODELS");
-        drawRightAlignedTime(display, 291, 28, lastUpdated);
-        drawProgressBar(display, 5, 38, 280, 11, gw, "Weekly", gwSub.c_str());
-        drawProgressBar(display, 5, 54, 280, 11, g5, "5 Hour", g5Sub.c_str());
+void drawDisplay1Data(const AntigravityData &ag, const SparkData &spark) {
+  display.setFont();
+  display.setTextColor(GxEPD_BLACK);
 
-        // เส้นคั่นกลาง
-        display.drawLine(5, 70, 291, 70, GxEPD_BLACK);
+  // -----------------------------------------------------------------------
+  // CARD 1: ANTIGRAVITY (กรอบบน x=2, y=2, w=292, h=60, r=4)
+  // -----------------------------------------------------------------------
+  display.drawRoundRect(2, 2, 292, 60, 4, GxEPD_BLACK);
+  display.drawLine(2, 17, 293, 17, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
 
-        // Claude Section
-        display.setFont();
-        display.setTextColor(GxEPD_BLACK);
-        display.setCursor(5, 80);
-        display.print("CLAUDE & GPT MODELS");
-        drawProgressBar(display, 5, 90, 280, 11, cw, "Weekly", cwSub.c_str());
-        drawProgressBar(display, 5, 106, 280, 11, c5, "5 Hour", c5Sub.c_str());
-      } while (display.nextPage());
-    }
+  // Header (y = 6) - เวลา last update อยู่หลังชื่อโมเดลทันที
+  printBold(display, 8, 6, "ANTIGRAVITY");
+  if (ag.lastUpdated.length() > 0) {
+    display.setCursor(84, 6);
+    display.print(ag.lastUpdated);
+  }
+  drawWiFiIconEink(display, 272, 3);
+
+  // Row 1: Gemini (y = 24)
+  printBold(display, 8, 24, "Gemini");
+  drawMiniBar(display, 50, 23, 40, 10, ag.geminiWeekly);
+  printBold(display, 94, 24, String(ag.geminiWeekly) + "%");
+  display.setCursor(122, 24);
+  display.print(ag.geminiWeeklyReset);
+
+  printBold(display, 160, 24, "5H");
+  drawMiniBar(display, 176, 23, 40, 10, ag.gemini5Hr);
+  printBold(display, 220, 24, String(ag.gemini5Hr) + "%");
+  display.setCursor(248, 24);
+  display.print(ag.gemini5HrReset);
+
+  // Row 2: Claude & GPT (y = 43)
+  printBold(display, 8, 43, "Claude");
+  drawMiniBar(display, 50, 42, 40, 10, ag.claudeWeekly);
+  printBold(display, 94, 43, String(ag.claudeWeekly) + "%");
+  display.setCursor(122, 43);
+  display.print(ag.claudeWeeklyReset);
+
+  printBold(display, 160, 43, "5H");
+  drawMiniBar(display, 176, 42, 40, 10, ag.claude5Hr);
+  printBold(display, 220, 43, String(ag.claude5Hr) + "%");
+  display.setCursor(248, 43);
+  display.print(ag.claude5HrReset);
+
+  // -----------------------------------------------------------------------
+  // CARD 2: SPARK LOCAL (กรอบล่าง x=2, y=66, w=292, h=60, r=4)
+  // -----------------------------------------------------------------------
+  display.drawRoundRect(2, 66, 292, 60, 4, GxEPD_BLACK);
+  display.drawLine(2, 81, 293, 81, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
+
+  // Header (y = 70) - วินาทีกลับมา พร้อมปรับสถานะเป็น -R
+  printBold(display, 6, 70, "SPARK LOCAL");
+  if (spark.lastUpdated.length() > 0) {
+    display.setCursor(77, 70);
+    display.print(spark.lastUpdated); // แสดงเวลาเต็มพร้อมวินาที (HH:mm:ss)
   }
 
-  // บันทึกค่าล่าสุด
-  prevGeminiWeekly = gw;
-  prevGemini5Hr = g5;
-  prevClaudeWeekly = cw;
-  prevClaude5Hr = c5;
-  prevGwTime = gwSub;
-  prevG5Time = g5Sub;
-  prevCwTime = cwSub;
-  prevC5Time = c5Sub;
+  // สถานะปรับเป็น -R, -A, -X ตามที่ต้องการ
+  String statChar = "-R";
+  if (spark.status == "Active") statChar = "-A";
+  else if (!spark.connected) statChar = "-X";
+  printBold(display, 129, 70, statChar);
+
+  // Token รวมต่อท้ายสถานะ (มีระยะห่างชัดเจน)
+  if (spark.connected && spark.totalTokens.length() > 0 && spark.totalTokens != "0") {
+    printBold(display, 147, 70, "All: " + spark.totalTokens);
+  }
+
+  // IP ขยับเข้ามาที่ x = 214 (สิ้นสุดที่ 280) เว้นขอบขวา 13px ไม่ติดกรอบ
+  display.setCursor(214, 70);
+  display.print("10.104.1.23");
+
+  // Row 1: Model & Today Tokens / Speed (y = 88)
+  printBold(display, 8, 88, "Model:");
+  String mName = spark.model;
+  if (mName.length() > 15) {
+    mName = mName.substring(0, 13) + "..";
+  }
+  display.setCursor(50, 88);
+  display.print(mName);
+
+  if (spark.connected && spark.todayTokens.length() > 0 && spark.todayTokens != "0") {
+    String tokStr = "Tokens: " + spark.todayTokens;
+    if (spark.speed.length() > 0) {
+      tokStr += " (" + spark.speed + ")";
+    }
+    int tokX = 285 - (int)tokStr.length() * 6;
+    printBold(display, tokX, 88, tokStr);
+  }
+
+  // Row 2: Resources RAM & CPU (y = 107) - ปรับบาร์ 48px เท่ากันและจัดระยะห่างไม่ให้เบียดกัน
+  if (spark.connected) {
+    // RAM
+    printBold(display, 8, 107, "RAM");
+    drawMiniBar(display, 34, 106, 48, 10, spark.ram);
+    printBold(display, 88, 107, String(spark.ram) + "%");
+    display.setCursor(116, 107);
+    display.print(spark.ramRatio);
+
+    // CPU
+    printBold(display, 176, 107, "CPU");
+    drawMiniBar(display, 202, 106, 48, 10, spark.cpu);
+    printBold(display, 256, 107, String(spark.cpu) + "%");
+  } else {
+    printBold(display, 8, 107, "Status: Offline / Host Unreachable");
+  }
 }
 
 // =========================================================================
-// จอที่ 2: แสดงโควต้าและ Token ของ Claude Code
+// จอที่ 2: CLAUDE CODE & OPENAI CODEX (การ์ดกรอบมุมมน 2 ช่อง)
 // =========================================================================
-void updateClaudeCodeDisplay(const ClaudeCodeData &cc) {
-  bool doFull = isFirstRender2 || partialCount2 >= fullRefreshEvery2;
+void updateDisplay2(const ClaudeCodeData &cc, const CodexData &codex) {
+  bool doFull = isFirstRender2 || partialCount2 >= fullRefreshEvery;
 
   if (doFull) {
     display2.setFullWindow();
     display2.firstPage();
     do {
       display2.fillScreen(GxEPD_WHITE);
-
-      // --- Header ---
-      display2.setFont(&FreeSansBold9pt7b);
-      display2.setTextColor(GxEPD_BLACK);
-      display2.setCursor(5, 18);
-      display2.print("Claude Code Usage");
-      display2.drawLine(5, 23, 291, 23, GxEPD_BLACK);
-
-      drawClaudeCodeData(cc);
-      drawWiFiIconEink(display2, 275, 5);
+      drawDisplay2Data(cc, codex);
     } while (display2.nextPage());
-
     isFirstRender2 = false;
     partialCount2 = 0;
   } else {
-    // Partial Refresh เฉพาะโซนข้อมูลใต้ Header
-    display2.setPartialWindow(0, 26, display2.width(), 98);
+    display2.setPartialWindow(0, 0, display2.width(), display2.height());
     display2.firstPage();
     do {
-      display2.fillRect(0, 26, display2.width(), 98, GxEPD_WHITE);
-      drawClaudeCodeData(cc);
+      display2.fillRect(0, 0, display2.width(), display2.height(), GxEPD_WHITE);
+      drawDisplay2Data(cc, codex);
     } while (display2.nextPage());
     partialCount2++;
   }
   display2.powerOff();
 
   prevCc = cc;
+  prevCodex = codex;
 }
 
-// วาดโซนข้อมูล (ใต้ Header) ของจอที่ 2
-void drawClaudeCodeData(const ClaudeCodeData &cc) {
-  // --- Plan Limits Section ---
+void drawDisplay2Data(const ClaudeCodeData &cc, const CodexData &codex) {
   display2.setFont();
   display2.setTextColor(GxEPD_BLACK);
-  printBold(display2, 5, 28, "PLAN LIMITS");
-  if (cc.rateLimited) {
-    // โดน 429 จาก Anthropic API: ขึ้นแถบดำ-ตัวหนังสือขาวให้เห็นชัด (จอนี้เป็นขาว-ดำล้วน)
-    drawRateLimitBanner(display2, 80, 26, cc.rateLimitReset);
+
+  // -----------------------------------------------------------------------
+  // CARD 1: CLAUDE CODE (กรอบบน x=2, y=2, w=292, h=60, r=4)
+  // -----------------------------------------------------------------------
+  display2.drawRoundRect(2, 2, 292, 60, 4, GxEPD_BLACK);
+  display2.drawLine(2, 17, 293, 17, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
+
+  // Header (y = 6) - เวลา last update อยู่หลังชื่อโมเดลทันที
+  printBold(display2, 8, 6, "CLAUDE CODE");
+  if (cc.lastUpdated.length() > 0) {
+    display2.setCursor(84, 6);
+    display2.print(cc.lastUpdated);
   }
-  drawRightAlignedTime(display2, 291, 28, cc.lastUpdated);
 
-  drawProgressBar(display2, 5, 38, 280, 11, cc.weekly, "Weekly",
-                  cc.weeklySub.c_str(), true);
-  drawProgressBar(display2, 5, 54, 280, 11, cc.fiveHr, "5 Hour",
-                  cc.fiveHrSub.c_str(), true);
+  if (cc.rateLimited) {
+    drawRateLimitBanner(display2, 138, 4, cc.rateLimitReset);
+  }
+  drawWiFiIconEink(display2, 272, 3);
 
-  // เส้นคั่นกลาง
-  display2.drawLine(5, 70, 291, 70, GxEPD_BLACK);
+  // Row 1: Plan Limits (y = 24)
+  printBold(display2, 8, 24, "Limit");
+  drawMiniBar(display2, 48, 23, 40, 10, cc.weekly);
+  printBold(display2, 92, 24, String(cc.weekly) + "%");
+  display2.setCursor(120, 24);
+  display2.print(cc.weeklySub);
 
-  // --- Tokens Section ---
-  display2.setFont();
-  display2.setTextColor(GxEPD_BLACK);
-  printBold(display2, 5, 80, "TOKENS");
+  printBold(display2, 160, 24, "5H");
+  drawMiniBar(display2, 176, 23, 40, 10, cc.fiveHr);
+  printBold(display2, 220, 24, String(cc.fiveHr) + "%");
+  display2.setCursor(248, 24);
+  display2.print(cc.fiveHrSub);
 
-  drawTokenRow(display2, 5, 90, "Today", cc.todayTotal, cc.todayIn,
-               cc.todayOut, cc.todayCache);
-  drawTokenRow(display2, 5, 106, "5 Hour", cc.windowTotal, cc.windowIn,
-               cc.windowOut, cc.windowCache);
+  // Row 2: Tokens (y = 43)
+  printBold(display2, 8, 43, "Tokens");
+  printBold(display2, 48, 43, "Day:");
+  printBold(display2, 74, 43, cc.todayTotal);
+  display2.setCursor(110, 43);
+  display2.print("(c:" + cc.todayCache + ")");
+
+  printBold(display2, 170, 43, "5H:");
+  printBold(display2, 192, 43, cc.windowTotal);
+  display2.setCursor(228, 43);
+  display2.print("(c:" + cc.windowCache + ")");
+
+  // -----------------------------------------------------------------------
+  // CARD 2: OPENAI CODEX (กรอบล่าง x=2, y=66, w=292, h=60, r=4)
+  // -----------------------------------------------------------------------
+  display2.drawRoundRect(2, 66, 292, 60, 4, GxEPD_BLACK);
+  display2.drawLine(2, 81, 293, 81, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
+
+  // Header (y = 70) - เวลา last update อยู่หลังชื่อโมเดลทันที
+  printBold(display2, 8, 70, "OPENAI CODEX");
+  if (codex.lastUpdated.length() > 0) {
+    display2.setCursor(88, 70);
+    display2.print(codex.lastUpdated);
+  }
+
+  if (codex.planType.length() > 0) {
+    String plan = codex.planType;
+    plan.toUpperCase();
+    printBold(display2, 142, 70, "[" + plan + "]");
+  }
+
+  if (codex.rateLimited) {
+    drawRateLimitBanner(display2, 190, 68, codex.rateLimitReset);
+  }
+
+  // Row 1: Primary Limit (y = 88)
+  printBold(display2, 8, 88, "Primary");
+  if (codex.connected && codex.primaryPercent >= 0) {
+    drawMiniBar(display2, 70, 87, 70, 10, codex.primaryPercent);
+    printBold(display2, 146, 88, String(codex.primaryPercent) + "%");
+    display2.setCursor(180, 88);
+    display2.print(codex.primaryReset);
+  } else if (codex.connected) {
+    display2.setCursor(70, 88);
+    display2.print("No data");
+  } else {
+    printBold(display2, 70, 88, "Not Connected");
+  }
+
+  // Row 2: Secondary Limit (y = 107)
+  printBold(display2, 8, 107, "Secondary");
+  if (codex.connected && codex.secondaryPercent >= 0) {
+    drawMiniBar(display2, 70, 106, 70, 10, codex.secondaryPercent);
+    printBold(display2, 146, 107, String(codex.secondaryPercent) + "%");
+    display2.setCursor(180, 107);
+    display2.print(codex.secondaryReset);
+  } else if (codex.connected) {
+    display2.setCursor(70, 107);
+    display2.print("Not available (Free Plan)");
+  } else {
+    display2.setCursor(8, 107);
+    display2.print("Requires login in ~/.codex/auth.json");
+  }
 }
 
-// พิมพ์ข้อความแบบตัวหนาเทียม (วาดซ้ำเลื่อน 1px ไปทางขวา) สำหรับฟอนต์มาตรฐานที่เส้นบาง
+// =========================================================================
+// ฟังก์ชันวาดแถบ Progress Bar ขนาดกะทัดรัด (Mini Bar)
+// =========================================================================
+void drawMiniBar(Adafruit_GFX &gfx, int x, int y, int w, int h, int percent) {
+  percent = constrain(percent, 0, 100);
+  gfx.drawRect(x, y, w, h, GxEPD_BLACK);
+  int fillW = (percent * (w - 2)) / 100;
+  if (fillW > 0) {
+    gfx.fillRect(x + 1, y + 1, fillW, h - 2, GxEPD_BLACK);
+  }
+}
+
+// =========================================================================
+// พิมพ์ข้อความแบบตัวหนาเทียม (วาดซ้ำเลื่อน 1px ไปทางขวา)
+// =========================================================================
 void printBold(Adafruit_GFX &gfx, int x, int y, const String &text) {
   gfx.setCursor(x, y);
   gfx.print(text);
@@ -507,149 +660,21 @@ void printBold(Adafruit_GFX &gfx, int x, int y, const String &text) {
   gfx.print(text);
 }
 
-// วาดแถว Token: ชื่อ | ยอดรวม | in / out / cache (ฟอนต์มาตรฐาน 6px ต่อตัวอักษร, ตัวหนาเทียม)
-void drawTokenRow(Adafruit_GFX &gfx, int x, int y, const char *label,
-                  const String &total, const String &in, const String &out,
-                  const String &cache) {
-  gfx.setFont();
-  gfx.setTextColor(GxEPD_BLACK);
-
-  printBold(gfx, x, y + 2, label);
-  printBold(gfx, x + 44, y + 2, total);
-  printBold(gfx, x + 92, y + 2,
-            "in " + in + " out " + out + " cache " + cache);
-}
-
 // =========================================================================
-// ฟังก์ชันอัปเดตเฉพาะแถวบาร์ที่ระบุ (Partial Refresh Byte-Aligned)
+// แถบเตือนโดน 429 Rate Limit (พื้นดำ-ตัวหนังสือขาว)
 // =========================================================================
-void updateSingleBarPartial(int y, int h, int percent, const char *label,
-                            const char *extraInfo) {
-  display.setPartialWindow(0, y, display.width(), h);
-  display.firstPage();
-  do {
-    // ล้างเฉพาะแถบความสูงนี้ด้วยสีขาว
-    display.fillRect(0, y, display.width(), h, GxEPD_WHITE);
-    drawProgressBar(display, 5, y + 2, 280, 11, percent, label, extraInfo);
-  } while (display.nextPage());
-}
-
-// =========================================================================
-// ฟังก์ชันวาดกราฟแท่ง (Progress Bar) พร้อมแสดง % และจำนวนวันที่เหลือ (สั้นลงเพื่อเว้นที่)
-// =========================================================================
-void drawProgressBar(Adafruit_GFX &gfx, int x, int y, int w, int h,
-                     int percent, const char *label, const char *extraInfo,
-                     bool bold) {
-#ifdef USE_3COLOR_DISPLAY
-  uint16_t color = (percent < 10) ? GxEPD_RED : GxEPD_BLACK;
-#else
-  uint16_t color = GxEPD_BLACK;
-#endif
-
-  gfx.setFont(); // ใช้ฟอนต์มาตรฐาน
-  gfx.setTextColor(color);
-
-  // 1. พิมพ์ Label (เช่น Weekly, 5 Hour)
-  // 2. พิมพ์ตัวเลขเปอร์เซ็นต์
-  if (bold) {
-    printBold(gfx, x, y + 2, label);
-    printBold(gfx, x + 44, y + 2, String(percent) + "%");
-  } else {
-    gfx.setCursor(x, y + 2);
-    gfx.print(label);
-    gfx.setCursor(x + 44, y + 2);
-    gfx.print(percent);
-    gfx.print("%");
-  }
-
-  // 3. วาดกรอบสี่เหลี่ยมของแถบบาร์ (ปรับความกว้างเป็น 130px เพื่อให้มีพื้นที่เหลือทางขวาสำหรับ
-  // Subtext)
-  int barX = x + 68;
-  int barW = 130;
-  gfx.drawRect(barX, y, barW, h, color);
-
-  // 4. เติมสีแถบ Progress ด้านใน
-  int fillW = (percent * (barW - 2)) / 100;
-  if (fillW > 0) {
-    gfx.fillRect(barX + 1, y + 1, fillW, h - 2, color);
-  }
-
-  // 5. แสดงข้อความจำนวนวันที่เหลือ / เวลาที่เหลือ (ทางขวาของแถบบาร์)
-  if (extraInfo != nullptr && strlen(extraInfo) > 0) {
-    if (bold) {
-      printBold(gfx, barX + barW + 8, y + 2, extraInfo);
-    } else {
-      gfx.setCursor(barX + barW + 8, y + 2);
-      gfx.print(extraInfo);
-    }
-  }
-}
-
-// =========================================================================
-// ฟังก์ชันวาดหน้าจอตอน Boot
-// =========================================================================
-void drawBootScreen(const char *text) {
-  display.setFullWindow();
-  display.firstPage();
-  do {
-    display.fillScreen(GxEPD_WHITE);
-    display.setFont(&FreeSans9pt7b);
-    display.setTextColor(GxEPD_BLACK);
-    display.setCursor(10, 60);
-    display.print(text);
-  } while (display.nextPage());
-}
-
-// หน้าจอเริ่มต้นของจอที่ 2 (Claude Code) รองรับข้อความ 2 บรรทัดคั่นด้วย '\n'
-void drawBootScreen2(const char *text) {
-  String t(text);
-  int nl = t.indexOf('\n');
-  display2.setFullWindow();
-  display2.firstPage();
-  do {
-    display2.fillScreen(GxEPD_WHITE);
-    display2.setFont(&FreeSans9pt7b);
-    display2.setTextColor(GxEPD_BLACK);
-    display2.setCursor(10, 55);
-    display2.print(nl < 0 ? t : t.substring(0, nl));
-    if (nl >= 0) {
-      display2.setCursor(10, 78);
-      display2.print(t.substring(nl + 1));
-    }
-  } while (display2.nextPage());
-  display2.powerOff();
-}
-
-// =========================================================================
-// ข้อความเวลาอัปเดตล่าสุด ชิดขวาบนแถวหัวข้อ section (เช่น "GEMINI MODELS", "PLAN LIMITS")
-// ใช้ฟอนต์มาตรฐาน (6px ต่อตัวอักษร) คำนวณตำแหน่ง x จากความยาวข้อความเอง
-// =========================================================================
-void drawRightAlignedTime(Adafruit_GFX &gfx, int rightEdge, int y,
-                          const String &t) {
-  if (t.length() == 0)
-    return;
-  gfx.setFont();
-  gfx.setTextColor(GxEPD_BLACK);
-  int x = rightEdge - (int)t.length() * 6;
-  gfx.setCursor(x, y);
-  gfx.print(t);
-}
-
-// =========================================================================
-// แถบเตือนโดน 429 Rate Limit: พื้นดำ-ตัวหนังสือขาว ให้เห็นชัดแม้บนจอขาว-ดำล้วน
-// =========================================================================
-void drawRateLimitBanner(Adafruit_GFX &gfx, int x, int y,
-                         const String &resetText) {
-  String msg = "RATE LIMIT " + resetText;
-  int boxW = (int)msg.length() * 6 + 8;
+void drawRateLimitBanner(Adafruit_GFX &gfx, int x, int y, const String &resetText) {
+  String msg = "RATE LIMIT";
+  if (resetText.length() > 0) msg += " " + resetText;
+  int boxW = (int)msg.length() * 6 + 6;
   int boxH = 11;
 
   gfx.fillRect(x, y, boxW, boxH, GxEPD_BLACK);
   gfx.setFont();
   gfx.setTextColor(GxEPD_WHITE);
-  gfx.setCursor(x + 4, y + 2);
+  gfx.setCursor(x + 3, y + 2);
   gfx.print(msg);
-  gfx.setTextColor(GxEPD_BLACK); // คืนค่าสีเริ่มต้นให้โค้ดถัดไปที่จะวาดต่อ
+  gfx.setTextColor(GxEPD_BLACK);
 }
 
 // =========================================================================
@@ -667,4 +692,45 @@ void drawWiFiIconEink(Adafruit_GFX &gfx, int x, int y) {
   gfx.fillRect(x, cy - 2, 16, 12, GxEPD_WHITE);
   gfx.fillTriangle(cx, cy, x, cy, x, cy - 9, GxEPD_WHITE);
   gfx.fillTriangle(cx, cy, x + 16, cy, x + 16, cy - 9, GxEPD_WHITE);
+}
+
+// =========================================================================
+// หน้าจอ Boot
+// =========================================================================
+void drawBootScreen(const char *text) {
+  String t(text);
+  int nl = t.indexOf('\n');
+  display.setFullWindow();
+  display.firstPage();
+  do {
+    display.fillScreen(GxEPD_WHITE);
+    display.setFont(&FreeSans9pt7b);
+    display.setTextColor(GxEPD_BLACK);
+    display.setCursor(10, 50);
+    display.print(nl < 0 ? t : t.substring(0, nl));
+    if (nl >= 0) {
+      display.setCursor(10, 75);
+      display.print(t.substring(nl + 1));
+    }
+  } while (display.nextPage());
+  display.powerOff();
+}
+
+void drawBootScreen2(const char *text) {
+  String t(text);
+  int nl = t.indexOf('\n');
+  display2.setFullWindow();
+  display2.firstPage();
+  do {
+    display2.fillScreen(GxEPD_WHITE);
+    display2.setFont(&FreeSans9pt7b);
+    display2.setTextColor(GxEPD_BLACK);
+    display2.setCursor(10, 50);
+    display2.print(nl < 0 ? t : t.substring(0, nl));
+    if (nl >= 0) {
+      display2.setCursor(10, 75);
+      display2.print(t.substring(nl + 1));
+    }
+  } while (display2.nextPage());
+  display2.powerOff();
 }

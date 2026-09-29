@@ -10,24 +10,32 @@ An ESP8266-based real-time AI Quota monitor using a 2.9" 3-color (Black/White/Re
 - **Low Power & Flicker-Free**: Supports selective Partial Refresh to update only modified bars without full-screen blinking.
 - **Visual Alerts**: Highlights low quota (<10%) in **Red** (on 3-color screens).
 - **Wi-Fi Connectivity**: Automatically reconnects to Wi-Fi and shows status icon.
-- **Antigravity / AI Token Monitoring**: Tracks Weekly and 5-Hour limits for Gemini and Claude / GPT models.
-- **Second Display – Claude Code**: Shows Claude Code plan limits (Weekly / 5-Hour remaining + reset time) and token usage for today and the current 5-hour window (in / out / cache). Data comes from the same bridge server (`AIToken/bridge_server.js`, started with `start_bridge.bat`).
+- **Antigravity / AI Token Monitoring**: Tracks Weekly and 5-Hour limits for Gemini and Claude / GPT models on Display 1.
+- **SPARK Local AI Monitoring**: Displays local Ollama model name, status (`Ready`/`Active`/`Offline`), all-time total tokens (`All: 22.5M`), today's tokens with inference speed (`21k (55 t/s)`), RAM usage with ratio (`92G/128G`), and CPU usage on Display 1.
+- **Claude Code CLI Monitoring**: Shows Claude Code plan limits (Weekly / 5-Hour remaining + reset time) and token usage for today and 5-Hour window on Display 2.
+- **OpenAI Codex CLI Monitoring**: Shows Primary & Secondary quota windows with reset countdowns and plan badge (`[PLUS]`, `[PRO]`, `[FREE]`) on Display 2.
+- **Rate Limit Alerts**: 429 warnings on Claude Code and Codex with countdown timer.
+- **Smart Partial Refresh**: Updates only changed values without full-screen flicker, with automatic full refresh every 30 updates to eliminate ghosting.
 
 ---
 
 ## 🛠️ Hardware Requirements
 
 - **Microcontroller**: NodeMCU V3 / ESP8266 (or ESP32 with pin adjustments)
-- **Display**: 2.9" E-ink Display (SPI Interface)
+- **Displays**: Dual 2.9" E-ink Displays (SPI Interface)
+  - Display 1: Antigravity IDE + SPARK Local
+  - Display 2: Claude Code + OpenAI Codex
 
 ### Pin Mapping (NodeMCU V3 ESP8266 -> E-Paper SPI)
 
 | E-Paper Pin | NodeMCU Pin | GPIO | Description |
 | :--- | :--- | :--- | :--- |
-| **BUSY** | `D2` | GPIO4 | Busy Status |
-| **RST** | `D4` | GPIO2 | Reset |
-| **DC** | `D3` | GPIO0 | Data / Command |
-| **CS** | `D8` | GPIO15 | Chip Select |
+| **BUSY (Disp 1)** | `D2` | GPIO4 | Busy Status (Display 1) |
+| **CS (Disp 1)** | `D8` | GPIO15 | Chip Select (Display 1) |
+| **BUSY (Disp 2)** | `D6` | GPIO12 | Busy Status (Display 2) |
+| **CS (Disp 2)** | `D1` | GPIO5 | Chip Select (Display 2) |
+| **RST (Shared)** | `D4` | GPIO2 | Shared Reset |
+| **DC (Shared)** | `D3` | GPIO0 | Shared Data / Command |
 | **CLK (SCK)** | `D5` | GPIO14 | SPI Clock |
 | **DIN (MOSI)** | `D7` | GPIO13 | SPI MOSI Data |
 | **GND** | `G` | GND | Ground |
@@ -64,21 +72,45 @@ const unsigned long refreshInterval = 60000; // Interval in ms (e.g. 1 minute)
 
 ```json
 {
-  "geminiWeekly": 85,
-  "geminiWeeklySubtext": "4d left",
+  "geminiWeekly": 94,
+  "geminiWeeklyReset": "5d 16h",
   "gemini5Hr": 100,
-  "gemini5HrSubtext": "4h left",
-  "claudeWeekly": 42,
-  "claudeWeeklySubtext": "2d left",
-  "claude5Hr": 8,
-  "claude5HrSubtext": "45m left",
+  "gemini5HrReset": "4h 12m",
+  "claudeWeekly": 100,
+  "claudeWeeklyReset": "6d 1h",
+  "claude5Hr": 100,
+  "claude5HrReset": "4h 23m",
+  "lastUpdated": "08:09:28",
 
-  "ccWeekly": 57,
-  "ccWeeklyReset": "2d 23h",
-  "cc5Hr": 97,
+  "sparkConnected": true,
+  "sparkModel": "gemma4-26b-uncensored",
+  "sparkStatus": "Ready",
+  "sparkCpu": 1,
+  "sparkRam": 75,
+  "sparkRamRatio": "92G/128G",
+  "sparkLastUpdated": "08:09:18",
+
+  "ccWeekly": 67,
+  "ccWeeklyReset": "2d 13h",
+  "cc5Hr": 98,
   "cc5HrReset": "4h 51m",
-  "ccTodayTokens": "3.96M", "ccTodayIn": "160k", "ccTodayOut": "64k", "ccTodayCache": "3.73M",
-  "ccWindowTokens": "1.09M", "ccWindowIn": "63k", "ccWindowOut": "11k", "ccWindowCache": "1.01M"
+  "ccTodayTokens": "3.96M",
+  "ccTodayCache": "3.73M",
+  "ccWindowTokens": "1.09M",
+  "ccWindowCache": "1.01M",
+  "ccRateLimited": false,
+  "ccRateLimitReset": "",
+  "ccLastUpdated": "08:07:38",
+
+  "codexConnected": true,
+  "codexPlanType": "plus",
+  "codexPrimaryPercent": 92,
+  "codexPrimaryReset": "4h 12m",
+  "codexSecondaryPercent": 58,
+  "codexSecondaryReset": "4d 6h",
+  "codexRateLimited": false,
+  "codexRateLimitReset": "",
+  "codexLastUpdated": "08:09:15"
 }
 ```
 
