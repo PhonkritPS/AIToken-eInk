@@ -118,6 +118,7 @@ struct SparkData {
 
 // จอ 2: Claude Code CLI
 struct ClaudeCodeData {
+  String planType = "";
   int weekly = 100;
   int fiveHr = 100;
   String weeklySub = "";
@@ -131,7 +132,7 @@ struct ClaudeCodeData {
   String lastUpdated = "";
 
   bool operator!=(const ClaudeCodeData &o) const {
-    return weekly != o.weekly || fiveHr != o.fiveHr ||
+    return planType != o.planType || weekly != o.weekly || fiveHr != o.fiveHr ||
            weeklySub != o.weeklySub || fiveHrSub != o.fiveHrSub ||
            todayTotal != o.todayTotal || todayCache != o.todayCache ||
            windowTotal != o.windowTotal || windowCache != o.windowCache ||
@@ -182,6 +183,7 @@ void drawRateLimitBanner(Adafruit_GFX &gfx, int x, int y, const String &resetTex
 void drawWiFiIconEink(Adafruit_GFX &gfx, int x, int y);
 void drawBootScreen(const char *text);
 void drawBootScreen2(const char *text);
+String formatPlanName(String plan);
 
 // =========================================================================
 // Setup
@@ -314,6 +316,7 @@ void fetchAndDisplayQuota() {
       // 3. Claude Code CLI
       // -------------------------------------------------------------
       ClaudeCodeData cc;
+      cc.planType = doc["ccPlanType"] | "";
       cc.weekly = doc["ccWeekly"] | 100;
       cc.fiveHr = doc["cc5Hr"] | 100;
       cc.weeklySub = formatSubtext(doc["ccWeeklyReset"] | doc["ccWeeklySubtext"] | "");
@@ -555,8 +558,13 @@ void drawDisplay2Data(const ClaudeCodeData &cc, const CodexData &codex) {
     display2.print(cc.lastUpdated);
   }
 
+  String ccPlan = formatPlanName(cc.planType);
+  if (ccPlan.length() > 0) {
+    printBold(display2, 142, 6, "[" + ccPlan + "]");
+  }
+
   if (cc.rateLimited) {
-    drawRateLimitBanner(display2, 138, 4, cc.rateLimitReset);
+    drawRateLimitBanner(display2, 190, 4, cc.rateLimitReset);
   }
   drawWiFiIconEink(display2, 272, 3);
 
@@ -598,32 +606,33 @@ void drawDisplay2Data(const ClaudeCodeData &cc, const CodexData &codex) {
     display2.print(codex.lastUpdated);
   }
 
-  if (codex.planType.length() > 0) {
-    String plan = codex.planType;
-    plan.toUpperCase();
-    printBold(display2, 142, 70, "[" + plan + "]");
+  String codexPlan = formatPlanName(codex.planType);
+  if (codexPlan.length() > 0) {
+    printBold(display2, 142, 70, "[" + codexPlan + "]");
   }
 
   if (codex.rateLimited) {
     drawRateLimitBanner(display2, 190, 68, codex.rateLimitReset);
   }
 
-  // Row 1: Primary Limit (y = 88)
-  printBold(display2, 8, 88, "Primary");
-  if (codex.connected && codex.primaryPercent >= 0) {
+  // The current Codex Pro API exposes its 7-day window as primary_window.
+  printBold(display2, 8, 88, "Weekly");
+  bool hasPrimaryQuota = codex.primaryPercent >= 0 &&
+                         !(codex.primaryPercent == 100 && codex.primaryReset.length() == 0);
+  if (codex.connected && hasPrimaryQuota) {
     drawMiniBar(display2, 70, 87, 70, 10, codex.primaryPercent);
     printBold(display2, 146, 88, String(codex.primaryPercent) + "%");
     display2.setCursor(180, 88);
     display2.print(codex.primaryReset);
   } else if (codex.connected) {
     display2.setCursor(70, 88);
-    display2.print("No data");
+    display2.print("Syncing usage...");
   } else {
     printBold(display2, 70, 88, "Not Connected");
   }
 
-  // Row 2: Secondary Limit (y = 107)
-  printBold(display2, 8, 107, "Secondary");
+  // Keep the optional second API window generic because its duration varies by plan.
+  printBold(display2, 8, 107, "Additional");
   if (codex.connected && codex.secondaryPercent >= 0) {
     drawMiniBar(display2, 70, 106, 70, 10, codex.secondaryPercent);
     printBold(display2, 146, 107, String(codex.secondaryPercent) + "%");
@@ -631,11 +640,24 @@ void drawDisplay2Data(const ClaudeCodeData &cc, const CodexData &codex) {
     display2.print(codex.secondaryReset);
   } else if (codex.connected) {
     display2.setCursor(70, 107);
-    display2.print("Not available (Free Plan)");
+    display2.print("Not provided by API");
   } else {
     display2.setCursor(8, 107);
     display2.print("Requires login in ~/.codex/auth.json");
   }
+}
+
+String formatPlanName(String plan) {
+  plan.trim();
+  plan.toLowerCase();
+
+  // The Codex auth API reports ChatGPT Pro as "prolite".
+  if (plan == "prolite" || plan == "pro_lite" || plan == "pro-lite") return "PRO";
+  if (plan == "chatgptplus" || plan == "chatgpt_plus") return "PLUS";
+  if (plan == "chatgptteam" || plan == "chatgpt_team") return "TEAM";
+
+  plan.toUpperCase();
+  return plan;
 }
 
 // =========================================================================

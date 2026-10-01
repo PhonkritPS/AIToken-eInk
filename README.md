@@ -12,8 +12,8 @@ An ESP8266-based real-time AI Quota monitor using a 2.9" 3-color (Black/White/Re
 - **Wi-Fi Connectivity**: Automatically reconnects to Wi-Fi and shows status icon.
 - **Antigravity / AI Token Monitoring**: Tracks Weekly and 5-Hour limits for Gemini and Claude / GPT models on Display 1.
 - **SPARK Local AI Monitoring**: Displays local Ollama model name, status (`Ready`/`Active`/`Offline`), all-time total tokens (`All: 22.5M`), today's tokens with inference speed (`21k (55 t/s)`), RAM usage with ratio (`92G/128G`), and CPU usage on Display 1.
-- **Claude Code CLI Monitoring**: Shows Claude Code plan limits (Weekly / 5-Hour remaining + reset time) and token usage for today and 5-Hour window on Display 2.
-- **OpenAI Codex CLI Monitoring**: Shows Primary & Secondary quota windows with reset countdowns and plan badge (`[PLUS]`, `[PRO]`, `[FREE]`) on Display 2.
+- **Claude Code CLI Monitoring**: Shows the subscribed plan badge, plan limits (Weekly / 5-Hour remaining + reset time), and token usage for today and the 5-Hour window on Display 2.
+- **OpenAI Codex CLI Monitoring**: Shows the quota windows returned by Codex with reset countdowns and the subscribed plan badge (`[PLUS]`, `[PRO]`, `[FREE]`) on Display 2.
 - **Rate Limit Alerts**: 429 warnings on Claude Code and Codex with countdown timer.
 - **Smart Partial Refresh**: Updates only changed values without full-screen flicker, with automatic full refresh every 30 updates to eliminate ghosting.
 
@@ -91,6 +91,7 @@ const unsigned long refreshInterval = 60000; // Interval in ms (e.g. 1 minute)
   "sparkLastUpdated": "08:09:18",
 
   "ccWeekly": 67,
+  "ccPlanType": "max",
   "ccWeeklyReset": "2d 13h",
   "cc5Hr": 98,
   "cc5HrReset": "4h 51m",
