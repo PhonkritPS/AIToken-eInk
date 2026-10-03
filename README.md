@@ -10,10 +10,10 @@ An ESP8266-based real-time AI Quota monitor using a 2.9" 3-color (Black/White/Re
 - **Low Power & Flicker-Free**: Supports selective Partial Refresh to update only modified bars without full-screen blinking.
 - **Visual Alerts**: Highlights low quota (<10%) in **Red** (on 3-color screens).
 - **Wi-Fi Connectivity**: Automatically reconnects to Wi-Fi and shows status icon.
-- **Antigravity / AI Token Monitoring**: Tracks Weekly and 5-Hour limits for Gemini and Claude / GPT models on Display 1.
-- **SPARK Local AI Monitoring**: Displays local Ollama model name, status (`Ready`/`Active`/`Offline`), all-time total tokens (`All: 22.5M`), today's tokens with inference speed (`21k (55 t/s)`), RAM usage with ratio (`92G/128G`), and CPU usage on Display 1.
+- **OpenAI Codex CLI Monitoring**: Shows the weekly quota window returned by Codex with reset countdown and the subscribed plan badge (`[PLUS]`, `[PRO]`, `[FREE]`) on Display 1.
+- **SPARK Local AI & Docker Containers Monitoring**: Displays local Ollama model name, status (`Ready`/`Active`/`Offline`), all-time total tokens (`All: 22.5M`), host machine RAM / CPU telemetry, active Docker container stats with mini bars, and today's token usage with inference speed on Display 1.
 - **Claude Code CLI Monitoring**: Shows the subscribed plan badge, plan limits (Weekly / 5-Hour remaining + reset time), and token usage for today and the 5-Hour window on Display 2.
-- **OpenAI Codex CLI Monitoring**: Shows the quota windows returned by Codex with reset countdowns and the subscribed plan badge (`[PLUS]`, `[PRO]`, `[FREE]`) on Display 2.
+- **Antigravity / AI Token Monitoring**: Tracks Weekly and 5-Hour limits for Gemini and Claude / GPT models on Display 2.
 - **Rate Limit Alerts**: 429 warnings on Claude Code and Codex with countdown timer.
 - **Smart Partial Refresh**: Updates only changed values without full-screen flicker, with automatic full refresh every 30 updates to eliminate ghosting.
 
@@ -23,8 +23,8 @@ An ESP8266-based real-time AI Quota monitor using a 2.9" 3-color (Black/White/Re
 
 - **Microcontroller**: NodeMCU V3 / ESP8266 (or ESP32 with pin adjustments)
 - **Displays**: Dual 2.9" E-ink Displays (SPI Interface)
-  - Display 1: Antigravity IDE + SPARK Local
-  - Display 2: Claude Code + OpenAI Codex
+  - Display 1: OpenAI Codex + SPARK Local (Containers & Host Telemetry)
+  - Display 2: Claude Code + Antigravity IDE
 
 ### Pin Mapping (NodeMCU V3 ESP8266 -> E-Paper SPI)
 
@@ -65,7 +65,7 @@ const char *password = "YOUR_WIFI_PASSWORD";
 
 // API Endpoint
 const char *apiUrl = "http://<YOUR_SERVER_IP>:5000/api/quota";
-const unsigned long refreshInterval = 60000; // Interval in ms (e.g. 1 minute)
+const unsigned long refreshInterval = 20000; // Interval in ms (e.g. 20 seconds)
 ```
 
 ### Expected API JSON Format
@@ -88,6 +88,13 @@ const unsigned long refreshInterval = 60000; // Interval in ms (e.g. 1 minute)
   "sparkCpu": 1,
   "sparkRam": 75,
   "sparkRamRatio": "92G/128G",
+  "sparkTotalTokens": "22.5M",
+  "sparkTodayTokens": "21k",
+  "sparkSpeed": "55 t/s",
+  "sparkContainers": [
+    { "name": "LLM", "cpu": 45, "running": true },
+    { "name": "ComfyUI", "cpu": 12, "running": true }
+  ],
   "sparkLastUpdated": "08:09:18",
 
   "ccWeekly": 67,
