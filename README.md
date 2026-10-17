@@ -24,7 +24,7 @@ An ESP8266-based real-time AI Quota monitor using a 2.9" 3-color (Black/White/Re
 - **Microcontroller**: NodeMCU V3 / ESP8266 (or ESP32 with pin adjustments)
 - **Displays**: Dual 2.9" E-ink Displays (SPI Interface)
   - Display 1: OpenAI Codex + SPARK Local (Containers & Host Telemetry)
-  - Display 2: Claude Code + Antigravity IDE
+  - Display 2: Antigravity IDE + Claude Code
 
 ### Pin Mapping (NodeMCU V3 ESP8266 -> E-Paper SPI)
 
