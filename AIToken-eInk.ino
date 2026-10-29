@@ -64,10 +64,13 @@ const char *password = "ilovephonkrit";
 
 // API Config
 const char *apiUrl = "http://172.100.2.122:5000/api/quota";
-const unsigned long refreshInterval = 20000; // เช็ค API ทุก 20 วินาที
+const unsigned long refreshInterval = 10000; // เช็ค API ทุก 10 วินาที (เท่ากับรอบที่ bridge อ่าน Spark/AI9700)
 unsigned long lastFetchTime = 0;
 
-const int fullRefreshEvery = 30; // Full Refresh ทุกๆ 30 ครั้งเพื่อล้าง ghosting
+const int fullRefreshEvery = 30; // จอ 2: Full Refresh ทุกๆ 30 ครั้งเพื่อล้าง ghosting
+// จอ 1: Full Refresh ตามเวลา ทุก 30 นาที (ทำตอนมีข้อมูลเปลี่ยนรอบแรกที่ครบเวลา ข้อมูลไม่เปลี่ยนก็ไม่วาด)
+const unsigned long fullRefreshInterval1Ms = 30UL * 60UL * 1000UL;
+unsigned long lastFullRefresh1 = 0;
 
 // =========================================================================
 // โครงสร้างข้อมูลแต่ละบริการ และสถานะก่อนหน้าเพื่อเช็คการเปลี่ยนแปลง
@@ -222,7 +225,6 @@ CodexData prevCodex;
 
 bool isFirstRender1 = true;
 bool isFirstRender2 = true;
-int partialCount1 = 0;
 int partialCount2 = 0;
 
 // Prototype functions
@@ -529,7 +531,7 @@ void fetchAndDisplayQuota() {
 //   AI9700      y=73 h=55 (3 แถว: Host + GPU/VRAM + โมเดล/slot) จบที่ y=127 ชิดขอบล่าง
 // =========================================================================
 void updateDisplay1(const SparkData &spark, const Ai9700Data &ai) {
-  bool doFull = isFirstRender1 || partialCount1 >= fullRefreshEvery;
+  bool doFull = isFirstRender1 || (millis() - lastFullRefresh1 >= fullRefreshInterval1Ms);
 
   if (doFull) {
     display.setFullWindow();
@@ -539,7 +541,7 @@ void updateDisplay1(const SparkData &spark, const Ai9700Data &ai) {
       drawDisplay1Data(spark, ai);
     } while (display.nextPage());
     isFirstRender1 = false;
-    partialCount1 = 0;
+    lastFullRefresh1 = millis();
   } else {
     display.setPartialWindow(0, 0, display.width(), display.height());
     display.firstPage();
@@ -547,7 +549,6 @@ void updateDisplay1(const SparkData &spark, const Ai9700Data &ai) {
       display.fillRect(0, 0, display.width(), display.height(), GxEPD_WHITE);
       drawDisplay1Data(spark, ai);
     } while (display.nextPage());
-    partialCount1++;
   }
   display.powerOff();
 
