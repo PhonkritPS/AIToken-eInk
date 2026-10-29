@@ -10,10 +10,11 @@ An ESP8266-based real-time AI Quota monitor using a 2.9" 3-color (Black/White/Re
 - **Low Power & Flicker-Free**: Supports selective Partial Refresh to update only modified bars without full-screen blinking.
 - **Visual Alerts**: Highlights low quota (<10%) in **Red** (on 3-color screens).
 - **Wi-Fi Connectivity**: Automatically reconnects to Wi-Fi and shows status icon.
-- **OpenAI Codex CLI Monitoring**: Shows the weekly quota window returned by Codex with reset countdown and the subscribed plan badge (`[PLUS]`, `[PRO]`, `[FREE]`) on Display 1.
+- **OpenAI Codex CLI Monitoring**: Shows the weekly quota window returned by Codex with reset countdown and the subscribed plan badge (`[PLUS]`, `[PRO]`, `[FREE]`) on Display 2.
 - **SPARK Local AI & Docker Containers Monitoring**: Displays local Ollama model name, status (`Ready`/`Active`/`Offline`), all-time total tokens (`All: 22.5M`), host machine RAM / CPU telemetry, active Docker container stats with mini bars, and today's token usage with inference speed on Display 1.
-- **Claude Code CLI Monitoring**: Shows the subscribed plan badge, plan limits (Weekly / 5-Hour remaining + reset time), and token usage for today and the 5-Hour window on Display 2.
-- **Antigravity / AI Token Monitoring**: Tracks Weekly and 5-Hour limits for Gemini and Claude / GPT models on Display 2.
+- **AI9700 Local AI Monitoring**: Second local AI card on Display 1 for the llama-server box (10.104.1.24, Radeon AI PRO R9700): model name, status, all-time and today token counts with generation speed (from llama-server `--metrics`), host RAM / CPU, GPU use % with VRAM, and busy slots.
+- **Claude Code CLI Monitoring**: Shows the subscribed plan badge and plan limits (Weekly / 5-Hour remaining + reset time) on Display 2.
+- **Antigravity / AI Token Monitoring**: Tracks Weekly and 5-Hour limits for Gemini and Claude / GPT models, plus the Gemini 4 Argon weekly limit when the IDE reports it, on Display 2.
 - **Rate Limit Alerts**: 429 warnings on Claude Code and Codex with countdown timer.
 - **Smart Partial Refresh**: Updates only changed values without full-screen flicker, with automatic full refresh every 30 updates to eliminate ghosting.
 
@@ -23,8 +24,8 @@ An ESP8266-based real-time AI Quota monitor using a 2.9" 3-color (Black/White/Re
 
 - **Microcontroller**: NodeMCU V3 / ESP8266 (or ESP32 with pin adjustments)
 - **Displays**: Dual 2.9" E-ink Displays (SPI Interface)
-  - Display 1: OpenAI Codex + SPARK Local (Containers & Host Telemetry)
-  - Display 2: Antigravity IDE + Claude Code
+  - Display 1: SPARK Local (Containers & Host Telemetry) + AI9700 (llama-server, GPU / VRAM)
+  - Display 2: Antigravity IDE + Claude Code + OpenAI Codex
 
 ### Pin Mapping (NodeMCU V3 ESP8266 -> E-Paper SPI)
 

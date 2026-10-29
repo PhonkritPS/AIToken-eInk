@@ -79,20 +79,24 @@ struct AntigravityData {
   int gemini5Hr = 100;
   int claudeWeekly = 100;
   int claude5Hr = 100;
+  int argonWeekly = -1; // -1 = IDE รุ่นนี้ไม่มีกลุ่ม Gemini 4 Argon แยก -> ไม่ต้องวาดแถว
   String geminiWeeklyReset = "";
   String gemini5HrReset = "";
   String claudeWeeklyReset = "";
   String claude5HrReset = "";
+  String argonWeeklyReset = "";
   String lastUpdated = "";
 
   bool operator!=(const AntigravityData &o) const {
     return ideRunning != o.ideRunning ||
            geminiWeekly != o.geminiWeekly || gemini5Hr != o.gemini5Hr ||
            claudeWeekly != o.claudeWeekly || claude5Hr != o.claude5Hr ||
+           argonWeekly != o.argonWeekly ||
            geminiWeeklyReset != o.geminiWeeklyReset ||
            gemini5HrReset != o.gemini5HrReset ||
            claudeWeeklyReset != o.claudeWeeklyReset ||
-           claude5HrReset != o.claude5HrReset;
+           claude5HrReset != o.claude5HrReset ||
+           argonWeeklyReset != o.argonWeeklyReset;
   }
 };
 
@@ -140,6 +144,33 @@ struct SparkData {
   }
 };
 
+// จอ 1: AI9700 Local AI (llama-server บน Radeon AI PRO R9700)
+struct Ai9700Data {
+  bool connected = false;
+  String model = "Local AI";
+  String status = "Offline";
+  int cpu = 0;
+  int ram = 0;
+  String ramRatio = "0G/0G";
+  int gpu = 0;          // GPU use %
+  String vramRatio = "0G/0G";
+  int slotsBusy = 0;
+  int slotsTotal = 0;
+  String totalTokens = "0";
+  String todayTokens = "0";
+  String speed = "";
+  String lastUpdated = "";
+
+  bool operator!=(const Ai9700Data &o) const {
+    return connected != o.connected || model != o.model || status != o.status ||
+           cpu != o.cpu || ram != o.ram || ramRatio != o.ramRatio ||
+           gpu != o.gpu || vramRatio != o.vramRatio ||
+           slotsBusy != o.slotsBusy || slotsTotal != o.slotsTotal ||
+           totalTokens != o.totalTokens || todayTokens != o.todayTokens ||
+           speed != o.speed;
+  }
+};
+
 // จอ 2: Claude Code CLI
 struct ClaudeCodeData {
   String planType = "";
@@ -164,7 +195,7 @@ struct ClaudeCodeData {
   }
 };
 
-// จอ 1: OpenAI Codex CLI
+// จอ 2: OpenAI Codex CLI
 struct CodexData {
   bool connected = false;
   String planType = "";
@@ -185,6 +216,7 @@ struct CodexData {
 
 AntigravityData prevAg;
 SparkData prevSpark;
+Ai9700Data prevAi9700;
 ClaudeCodeData prevCc;
 CodexData prevCodex;
 
@@ -195,10 +227,17 @@ int partialCount2 = 0;
 
 // Prototype functions
 void fetchAndDisplayQuota();
-void updateDisplay1(const CodexData &codex, const SparkData &spark);
-void drawDisplay1Data(const CodexData &codex, const SparkData &spark);
-void updateDisplay2(const ClaudeCodeData &cc, const AntigravityData &ag);
-void drawDisplay2Data(const ClaudeCodeData &cc, const AntigravityData &ag);
+void updateDisplay1(const SparkData &spark, const Ai9700Data &ai);
+void drawDisplay1Data(const SparkData &spark, const Ai9700Data &ai);
+void drawHostRow(Adafruit_GFX &gfx, int y, int ram, const String &ramRatio, int cpu,
+                 const String &todayTokens, const String &speed);
+void drawUsageRow(Adafruit_GFX &gfx, int y, const String &label, const String &detail,
+                  bool showBar, int barPercent, const String &rightText);
+void drawLocalAiHeader(Adafruit_GFX &gfx, int y, const String &title, const String &lastUpdated,
+                       bool connected, const String &status, const String &totalTokens,
+                       const String &ip);
+void updateDisplay2(const ClaudeCodeData &cc, const AntigravityData &ag, const CodexData &codex);
+void drawDisplay2Data(const ClaudeCodeData &cc, const AntigravityData &ag, const CodexData &codex);
 void drawMiniBar(Adafruit_GFX &gfx, int x, int y, int w, int h, int percent);
 void printBold(Adafruit_GFX &gfx, int x, int y, const String &text);
 void drawRateLimitBanner(Adafruit_GFX &gfx, int x, int y, const String &resetText);
@@ -219,12 +258,12 @@ void setup() {
   pinMode(EPD2_CS, OUTPUT);
   digitalWrite(EPD2_CS, HIGH);
 
-  // 1. เริ่มการทำงานจอที่ 1 (Codex + SPARK Local)
+  // 1. เริ่มการทำงานจอที่ 1 (SPARK Local เต็มจอ)
   display.init(115200);
   display.setRotation(1); // แนวนอน 296 x 128
   display.setTextColor(GxEPD_BLACK);
 
-  // 2. เริ่มการทำงานจอที่ 2 (Antigravity + Claude Code)
+  // 2. เริ่มการทำงานจอที่ 2 (Antigravity + Claude Code + Codex)
   display2.init(115200);
   display2.setRotation(1); // แนวนอน 296 x 128
   display2.setTextColor(GxEPD_BLACK);
@@ -306,16 +345,19 @@ void fetchAndDisplayQuota() {
       ag.gemini5Hr = doc["gemini5Hr"] | 100;
       ag.claudeWeekly = doc["claudeWeekly"] | 100;
       ag.claude5Hr = doc["claude5Hr"] | 100;
+      ag.argonWeekly = doc["argonWeekly"] | -1;
 
       String gwSub = doc["geminiWeeklyReset"] | doc["geminiWeeklySubtext"] | "";
       String g5Sub = doc["gemini5HrReset"] | doc["gemini5HrSubtext"] | "";
       String cwSub = doc["claudeWeeklyReset"] | doc["claudeWeeklySubtext"] | "";
       String c5Sub = doc["claude5HrReset"] | doc["claude5HrSubtext"] | "";
+      String awSub = doc["argonWeeklyReset"] | "";
 
       ag.geminiWeeklyReset = formatSubtext(gwSub);
       ag.gemini5HrReset = formatSubtext(g5Sub);
       ag.claudeWeeklyReset = formatSubtext(cwSub);
       ag.claude5HrReset = formatSubtext(c5Sub);
+      ag.argonWeeklyReset = formatSubtext(awSub);
       ag.lastUpdated = doc["lastUpdated"] | "";
 
       // -------------------------------------------------------------
@@ -400,6 +442,24 @@ void fetchAndDisplayQuota() {
         }
       }
 
+      // -------------------------------------------------------------
+      // 2.1 AI9700 Local AI (llama-server)
+      // -------------------------------------------------------------
+      Ai9700Data ai;
+      ai.connected = doc["ai9700Connected"] | false;
+      ai.model = doc["ai9700Model"] | "Local AI";
+      ai.status = doc["ai9700Status"] | "Offline";
+      ai.cpu = doc["ai9700Cpu"] | 0;
+      ai.ram = doc["ai9700Ram"] | 0;
+      ai.ramRatio = doc["ai9700RamRatio"] | "0G/0G";
+      ai.gpu = doc["ai9700Gpu"] | 0;
+      ai.vramRatio = doc["ai9700VramRatio"] | "0G/0G";
+      ai.slotsBusy = doc["ai9700SlotsBusy"] | 0;
+      ai.slotsTotal = doc["ai9700SlotsTotal"] | 0;
+      ai.totalTokens = doc["ai9700TotalTokens"] | "0";
+      ai.todayTokens = doc["ai9700TodayTokens"] | "0";
+      ai.speed = doc["ai9700Speed"] | "";
+      ai.lastUpdated = doc["ai9700LastUpdated"] | "";
 
       // -------------------------------------------------------------
       // 3. Claude Code CLI
@@ -435,18 +495,18 @@ void fetchAndDisplayQuota() {
       // -------------------------------------------------------------
       // ตรวจสอบการอัปเดตของแต่ละหน้าจอ
       // -------------------------------------------------------------
-      bool disp1Changed = isFirstRender1 || (codex != prevCodex) || (spark != prevSpark);
+      bool disp1Changed = isFirstRender1 || (spark != prevSpark) || (ai != prevAi9700);
       if (disp1Changed) {
-        Serial.println("[INFO] Display 1 (Codex & SPARK) data changed -> updating...");
-        updateDisplay1(codex, spark);
+        Serial.println("[INFO] Display 1 (SPARK & AI9700) data changed -> updating...");
+        updateDisplay1(spark, ai);
       } else {
         Serial.println("[INFO] Display 1 data unchanged.");
       }
 
-      bool disp2Changed = isFirstRender2 || (cc != prevCc) || (ag != prevAg);
+      bool disp2Changed = isFirstRender2 || (cc != prevCc) || (ag != prevAg) || (codex != prevCodex);
       if (disp2Changed) {
-        Serial.println("[INFO] Display 2 (Antigravity & Claude Code) data changed -> updating...");
-        updateDisplay2(cc, ag);
+        Serial.println("[INFO] Display 2 (Antigravity & Claude Code & Codex) data changed -> updating...");
+        updateDisplay2(cc, ag, codex);
       } else {
         Serial.println("[INFO] Display 2 data unchanged.");
       }
@@ -463,9 +523,12 @@ void fetchAndDisplayQuota() {
 }
 
 // =========================================================================
-// จอที่ 1: OPENAI CODEX & SPARK LOCAL (การ์ดกรอบมุมมน 2 ช่อง)
+// จอที่ 1: SPARK LOCAL & AI9700 (การ์ดกรอบมุมมน 2 ช่อง)
+// ใช้กฎช่องว่างเดียวกับจอ 2: ทุกช่องว่าง 4px, ตัวอักษร/บาร์สูง 7px วาดที่ y เดียวกัน
+//   SPARK LOCAL y=0  h=66 (4 แถว: Host + container 3 ตัว)
+//   AI9700      y=73 h=55 (3 แถว: Host + GPU/VRAM + โมเดล/slot) จบที่ y=127 ชิดขอบล่าง
 // =========================================================================
-void updateDisplay1(const CodexData &codex, const SparkData &spark) {
+void updateDisplay1(const SparkData &spark, const Ai9700Data &ai) {
   bool doFull = isFirstRender1 || partialCount1 >= fullRefreshEvery;
 
   if (doFull) {
@@ -473,7 +536,7 @@ void updateDisplay1(const CodexData &codex, const SparkData &spark) {
     display.firstPage();
     do {
       display.fillScreen(GxEPD_WHITE);
-      drawDisplay1Data(codex, spark);
+      drawDisplay1Data(spark, ai);
     } while (display.nextPage());
     isFirstRender1 = false;
     partialCount1 = 0;
@@ -482,188 +545,168 @@ void updateDisplay1(const CodexData &codex, const SparkData &spark) {
     display.firstPage();
     do {
       display.fillRect(0, 0, display.width(), display.height(), GxEPD_WHITE);
-      drawDisplay1Data(codex, spark);
+      drawDisplay1Data(spark, ai);
     } while (display.nextPage());
     partialCount1++;
   }
   display.powerOff();
 
-  prevCodex = codex;
   prevSpark = spark;
+  prevAi9700 = ai;
 }
 
-void drawDisplay1Data(const CodexData &codex, const SparkData &spark) {
+// หัวการ์ด Local AI: ชื่อ | เวลา | สถานะ -R/-A/-X | All: token สะสม | IP
+void drawLocalAiHeader(Adafruit_GFX &gfx, int y, const String &title, const String &lastUpdated,
+                       bool connected, const String &status, const String &totalTokens,
+                       const String &ip) {
+  printBold(gfx, 6, y, title);
+  if (lastUpdated.length() > 0) {
+    gfx.setCursor(77, y);
+    gfx.print(lastUpdated); // แสดงเวลาเต็มพร้อมวินาที (HH:mm:ss)
+  }
+
+  String statChar = "-R";
+  if (status == "Active") statChar = "-A";
+  else if (!connected) statChar = "-X";
+  printBold(gfx, 129, y, statChar);
+
+  if (connected && totalTokens.length() > 0 && totalTokens != "0") {
+    printBold(gfx, 147, y, "All: " + totalTokens);
+  }
+
+  // IP ที่ x = 214 (สิ้นสุดที่ 280)
+  gfx.setCursor(214, y);
+  gfx.print(ip);
+}
+
+// แถว Host: RAM: xx% ratio  CPU: xx%  ........  T: token (speed t/s) ชิดขวา
+void drawHostRow(Adafruit_GFX &gfx, int y, int ram, const String &ramRatio, int cpu,
+                 const String &todayTokens, const String &speed) {
+  int rx = 8;
+  auto drawField = [&](const String &text, bool bold) {
+    if (bold) printBold(gfx, rx, y, text);
+    else {
+      gfx.setCursor(rx, y);
+      gfx.print(text);
+    }
+    rx += (int)text.length() * 6;
+  };
+
+  drawField("RAM:", true);
+  rx += 2;
+  drawField(String(ram) + "%", true);
+  rx += 4;
+  drawField(ramRatio, false);
+  rx += 6;
+  drawField("CPU:", true);
+  rx += 2;
+  drawField(String(cpu) + "%", true);
+
+  String tokStr = (todayTokens.length() > 0) ? todayTokens : "0";
+  String sp = speed;
+  sp.trim();
+  if (sp.length() == 0) sp = "0";
+  if (!sp.endsWith("t/s")) sp += " t/s";
+  String tokLine = "T: " + tokStr + " (" + sp + ")";
+  printBold(gfx, 286 - (int)tokLine.length() * 6, y, tokLine);
+}
+
+// แถวใช้งาน: [label ตัวหนา] detail ....... [บาร์] ค่าชิดขวา (แบบเดียวกับแถว container)
+void drawUsageRow(Adafruit_GFX &gfx, int y, const String &label, const String &detail,
+                  bool showBar, int barPercent, const String &rightText) {
+  int x = 8;
+  if (label.length() > 0) {
+    printBold(gfx, x, y, label);
+    x += (int)label.length() * 6 + 6;
+  }
+  String d = detail;
+  int maxChars = (190 - x) / 6; // ห้ามล้นไปทับบาร์ที่ x = 196
+  if ((int)d.length() > maxChars) d = d.substring(0, maxChars - 2) + "..";
+  gfx.setCursor(x, y);
+  gfx.print(d);
+
+  if (showBar) {
+    drawMiniBar(gfx, 196, y, 34, 7, barPercent);
+  }
+  if (rightText.length() > 0) {
+    printBold(gfx, 286 - (int)rightText.length() * 6, y, rightText);
+  }
+}
+
+void drawDisplay1Data(const SparkData &spark, const Ai9700Data &ai) {
   display.setFont();
   display.setTextColor(GxEPD_BLACK);
 
   // -----------------------------------------------------------------------
-  // CARD 1: OPENAI CODEX (กรอบบน x=2, y=2, w=292, h=38, r=4)
+  // CARD 1: SPARK LOCAL (x=0, y=0, w=296, h=66, r=4)
   // -----------------------------------------------------------------------
-  display.drawRoundRect(2, 2, 292, 38, 4, GxEPD_BLACK);
-  display.drawLine(2, 17, 293, 17, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
+  display.drawRoundRect(0, 0, 296, 66, 4, GxEPD_BLACK);
+  display.drawLine(0, 16, 295, 16, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
 
-  // Header (y = 6) - เวลา last update อยู่หลังชื่อโมเดลทันที
-  printBold(display, 8, 6, "OPENAI CODEX");
-  if (codex.lastUpdated.length() > 0) {
-    display.setCursor(88, 6);
-    display.print(codex.lastUpdated);
-  }
-
-  String codexPlan = formatPlanName(codex.planType);
-  if (codexPlan.length() > 0) {
-    printBold(display, 142, 6, "[" + codexPlan + "]");
-  }
-
-  if (codex.rateLimited) {
-    drawRateLimitBanner(display, 190, 4, codex.rateLimitReset);
-  }
-  drawWiFiIconEink(display, 272, 3);
-
-  // Row 1: Weekly Limit (y = 24)
-  printBold(display, 8, 24, "Weekly");
-  bool hasPrimaryQuota = codex.primaryPercent >= 0 &&
-                         !(codex.primaryPercent == 100 && codex.primaryReset.length() == 0);
-  if (codex.connected && hasPrimaryQuota) {
-    drawMiniBar(display, 52, 23, 60, 10, codex.primaryPercent);
-    printBold(display, 118, 24, String(codex.primaryPercent) + "%");
-    display.setCursor(154, 24);
-    display.print(codex.primaryReset);
-  } else if (codex.connected) {
-    display.setCursor(52, 24);
-    display.print("Syncing usage...");
-  } else {
-    printBold(display, 52, 24, "Not Connected");
-  }
-
-  // -----------------------------------------------------------------------
-  // CARD 2: SPARK LOCAL (กรอบล่าง x=2, y=44, w=292, h=82, r=4)
-  // -----------------------------------------------------------------------
-  display.drawRoundRect(2, 44, 292, 82, 4, GxEPD_BLACK);
-  display.drawLine(2, 59, 293, 59, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
-
-  // Header (y = 48) - วินาทีกลับมา พร้อมปรับสถานะเป็น -R
-  printBold(display, 6, 48, "SPARK LOCAL");
-  if (spark.lastUpdated.length() > 0) {
-    display.setCursor(77, 48);
-    display.print(spark.lastUpdated); // แสดงเวลาเต็มพร้อมวินาที (HH:mm:ss)
-  }
-
-  // สถานะปรับเป็น -R, -A, -X ตามที่ต้องการ
-  String statChar = "-R";
-  if (spark.status == "Active") statChar = "-A";
-  else if (!spark.connected) statChar = "-X";
-  printBold(display, 129, 48, statChar);
-
-  // Token รวมต่อท้ายสถานะ (มีระยะห่างชัดเจน)
-  if (spark.connected && spark.totalTokens.length() > 0 && spark.totalTokens != "0") {
-    printBold(display, 147, 48, "All: " + spark.totalTokens);
-  }
-
-  // IP ขยับเข้ามาที่ x = 214 (สิ้นสุดที่ 280) เว้นขอบขวา 13px ไม่ติดกรอบ
-  display.setCursor(214, 48);
-  display.print("10.104.1.23");
+  drawLocalAiHeader(display, 5, "SPARK LOCAL", spark.lastUpdated, spark.connected,
+                    spark.status, spark.totalTokens, "10.104.1.23");
 
   if (spark.connected) {
-    // Row 1: Host Telemetry - RAM, CPU, Token, Speed เรียงต่อกันบรรทัดเดียว (y = 65)
-    // วางต่อ ๆ กันแบบคำนวณความกว้างจากความยาวข้อความจริง กันพื้นที่ว่างเกินจำเป็น/ล้นขอบจอ
-    {
-      int rx = 8;
-      auto drawField = [&](const String &text, bool bold) {
-        if (bold) printBold(display, rx, 65, text);
-        else {
-          display.setCursor(rx, 65);
-          display.print(text);
-        }
-        rx += (int)text.length() * 6;
-      };
+    // Row 1: Host (y = 21)
+    drawHostRow(display, 21, spark.ram, spark.ramRatio, spark.cpu, spark.todayTokens, spark.speed);
 
-      // ตัด label "Host:" ออก (ไม่จำเป็น) เพื่อเอาที่ไปให้ Token + Speed แสดงได้ครบไม่ล้นขอบจอ
-      drawField("RAM:", true);
-      rx += 2;
-      drawField(String(spark.ram) + "%", true);
-      rx += 4;
-      drawField(spark.ramRatio, false);
-      rx += 6;
-      drawField("CPU:", true);
-      rx += 2;
-      drawField(String(spark.cpu) + "%", true);
-
-      // Token + Speed ชิดขวาสุดของจอ (เหมือนวิธีจัด % CPU ของ container ด้านล่าง)
-      String tokStr = (spark.todayTokens.length() > 0) ? spark.todayTokens : "0";
-      String sp = spark.speed;
-      sp.trim();
-      if (sp.length() == 0) sp = "0";
-      if (!sp.endsWith("t/s")) sp += " t/s";
-      String tokLine = "T: " + tokStr + " (" + sp + ")";
-      int tokX = 286 - (int)tokLine.length() * 6;
-      printBold(display, tokX, 65, tokLine);
-    }
-
-    // Row 2 & Row 3: Containers / Models (y = 80, y = 95)
-    auto formatContainerName = [](const String &rawName) -> String {
-      if (rawName.startsWith("ollama-")) {
-        return rawName.substring(7); // ตัด ollama- ออก แสดงชื่อโมเดลเพียวๆ ไม่มี Model:
-      }
-      return rawName;
-    };
-
-    if (spark.containerCount > 0) {
-      // Container 1 (y = 80)
-      String c1Name = formatContainerName(spark.containers[0].name);
-      if (c1Name.length() > 28) c1Name = c1Name.substring(0, 26) + "..";
-      display.setCursor(8, 80);
-      display.print(c1Name);
-
-      if (spark.containers[0].running) {
-        drawMiniBar(display, 196, 79, 34, 9, spark.containers[0].cpuVal);
-      }
-      int x1 = 286 - (int)spark.containers[0].cpuStr.length() * 6;
-      printBold(display, x1, 80, spark.containers[0].cpuStr);
-    }
-
-    if (spark.containerCount > 1) {
-      // Container 2 / Model (y = 95)
-      String c2Name = formatContainerName(spark.containers[1].name);
-      if (c2Name.length() > 28) c2Name = c2Name.substring(0, 26) + "..";
-      display.setCursor(8, 95);
-      display.print(c2Name);
-
-      if (spark.containers[1].running) {
-        drawMiniBar(display, 196, 94, 34, 9, spark.containers[1].cpuVal);
-      }
-      int x2 = 286 - (int)spark.containers[1].cpuStr.length() * 6;
-      printBold(display, x2, 95, spark.containers[1].cpuStr);
-    }
-
-    if (spark.containerCount > 2) {
-      // Container 3 / Model (y = 110) ใช้บรรทัดที่เคยเป็น Tokens
-      String c3Name = formatContainerName(spark.containers[2].name);
-      if (c3Name.length() > 28) c3Name = c3Name.substring(0, 26) + "..";
-      display.setCursor(8, 110);
-      display.print(c3Name);
-
-      if (spark.containers[2].running) {
-        drawMiniBar(display, 196, 109, 34, 9, spark.containers[2].cpuVal);
-      }
-      int x3 = 286 - (int)spark.containers[2].cpuStr.length() * 6;
-      printBold(display, x3, 110, spark.containers[2].cpuStr);
+    // Row 2-4: Containers (y = 32, 43, 54)
+    const int containerY[3] = {32, 43, 54};
+    for (int i = 0; i < spark.containerCount && i < 3; i++) {
+      String name = spark.containers[i].name;
+      if (name.startsWith("ollama-")) name = name.substring(7); // แสดงชื่อโมเดลเพียวๆ
+      drawUsageRow(display, containerY[i], "", name, spark.containers[i].running,
+                   spark.containers[i].cpuVal, spark.containers[i].cpuStr);
     }
 
     if (spark.containerCount == 0) {
-      display.setCursor(8, 80);
+      display.setCursor(8, 32);
       display.print("Waiting for container stats...");
     }
   } else {
-    printBold(display, 8, 80, "Status: Offline / Host Unreachable");
-    display.setCursor(8, 98);
+    printBold(display, 8, 32, "Status: Offline / Host Unreachable");
+    display.setCursor(8, 43);
     display.print("Check Ollama or Local AI Server");
+  }
+
+  // -----------------------------------------------------------------------
+  // CARD 2: AI9700 (x=0, y=73, w=296, h=55, r=4)
+  // -----------------------------------------------------------------------
+  display.drawRoundRect(0, 73, 296, 55, 4, GxEPD_BLACK);
+  display.drawLine(0, 89, 295, 89, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
+
+  // SSH ได้แต่ llama-server ไม่ตอบ (status Offline) ให้ขึ้น -X เหมือนเครื่องปิด
+  bool aiUp = ai.connected && ai.status != "Offline";
+  drawLocalAiHeader(display, 78, "AI9700", ai.lastUpdated, aiUp, ai.status,
+                    ai.totalTokens, "10.104.1.24");
+
+  if (ai.connected) {
+    // Row 1: Host (y = 94)
+    drawHostRow(display, 94, ai.ram, ai.ramRatio, ai.cpu, ai.todayTokens, ai.speed);
+
+    // Row 2: GPU use % + VRAM (y = 105)
+    drawUsageRow(display, 105, "GPU", "VRAM " + ai.vramRatio, true, ai.gpu, String(ai.gpu) + "%");
+
+    // Row 3: โมเดล + slot ที่กำลังตอบอยู่ (y = 116)
+    if (ai.status == "Offline") {
+      drawUsageRow(display, 116, "", "llama-server not responding", false, 0, "");
+    } else if (ai.slotsTotal > 0) {
+      drawUsageRow(display, 116, "", ai.model, true, (ai.slotsBusy * 100) / ai.slotsTotal,
+                   "slot " + String(ai.slotsBusy) + "/" + String(ai.slotsTotal));
+    } else {
+      drawUsageRow(display, 116, "", ai.model, false, 0, "");
+    }
+  } else {
+    printBold(display, 8, 94, "Status: Offline / Host Unreachable");
+    display.setCursor(8, 105);
+    display.print("Check AI9700 (SSH / llama-server)");
   }
 }
 
 // =========================================================================
-// จอที่ 2: ANTIGRAVITY & CLAUDE CODE (การ์ดกรอบมุมมน 2 ช่อง)
+// จอที่ 2: ANTIGRAVITY & CLAUDE CODE & CODEX (การ์ดกรอบมุมมน 3 ช่อง)
 // =========================================================================
-void updateDisplay2(const ClaudeCodeData &cc, const AntigravityData &ag) {
+void updateDisplay2(const ClaudeCodeData &cc, const AntigravityData &ag, const CodexData &codex) {
   bool doFull = isFirstRender2 || partialCount2 >= fullRefreshEvery;
 
   if (doFull) {
@@ -671,7 +714,7 @@ void updateDisplay2(const ClaudeCodeData &cc, const AntigravityData &ag) {
     display2.firstPage();
     do {
       display2.fillScreen(GxEPD_WHITE);
-      drawDisplay2Data(cc, ag);
+      drawDisplay2Data(cc, ag, codex);
     } while (display2.nextPage());
     isFirstRender2 = false;
     partialCount2 = 0;
@@ -680,7 +723,7 @@ void updateDisplay2(const ClaudeCodeData &cc, const AntigravityData &ag) {
     display2.firstPage();
     do {
       display2.fillRect(0, 0, display2.width(), display2.height(), GxEPD_WHITE);
-      drawDisplay2Data(cc, ag);
+      drawDisplay2Data(cc, ag, codex);
     } while (display2.nextPage());
     partialCount2++;
   }
@@ -688,106 +731,153 @@ void updateDisplay2(const ClaudeCodeData &cc, const AntigravityData &ag) {
 
   prevCc = cc;
   prevAg = ag;
+  prevCodex = codex;
 }
 
-void drawDisplay2Data(const ClaudeCodeData &cc, const AntigravityData &ag) {
+void drawDisplay2Data(const ClaudeCodeData &cc, const AntigravityData &ag, const CodexData &codex) {
   display2.setFont();
   display2.setTextColor(GxEPD_BLACK);
 
   // -----------------------------------------------------------------------
-  // CARD 1: ANTIGRAVITY (กรอบบน x=2, y=2, w=292, h=60, r=4)
+  // เลย์เอาต์จอ 2 ใช้กฎเดียวกันทุกการ์ด: ทุกช่องว่างเท่ากัน G = 4px
+  //   ขอบบน | G | หัวการ์ด (7) | G | เส้นคั่น | G | แถว (7) | G | แถว (7) | G | ขอบล่าง
+  // ตัวอักษรฟอนต์มาตรฐานสูงจริง 7px (y ถึง y+6) บาร์สูง 7px วาดที่ y เดียวกับตัวอักษร
+  // บาร์จึงอยู่กึ่งกลางตัวอักษรพอดี
+  //   ANTIGRAVITY  y=0  h=55 (3 แถว)  ชิดขอบบนและซ้าย-ขวาของจอ
+  //   CLAUDE CODE  y=59 h=33 (1 แถว)  ห่างการ์ดบน 4px
+  //   OPENAI CODEX y=95 h=33 (1 แถว)  ห่างการ์ดบน 3px, จบที่ y=127 ชิดขอบล่างของจอ
   // -----------------------------------------------------------------------
-  display2.drawRoundRect(2, 2, 292, 60, 4, GxEPD_BLACK);
-  display2.drawLine(2, 17, 293, 17, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
+  const int BAR_H = 7;
+
+  // -----------------------------------------------------------------------
+  // CARD 1: ANTIGRAVITY (x=0, y=0, w=296, h=55, r=4)
+  // -----------------------------------------------------------------------
+  display2.drawRoundRect(0, 0, 296, 55, 4, GxEPD_BLACK);
+  display2.drawLine(0, 16, 295, 16, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
 
   // Header (y = 6)
-  printBold(display2, 8, 6, "ANTIGRAVITY");
+  printBold(display2, 8, 5, "ANTIGRAVITY");
 
   if (ag.ideRunning) {
     if (ag.lastUpdated.length() > 0) {
-      display2.setCursor(84, 6);
+      display2.setCursor(84, 5);
       display2.print(ag.lastUpdated);
     }
 
-    // Row 1: Gemini (y = 24)
-    printBold(display2, 8, 24, "Gemini");
-    drawMiniBar(display2, 50, 23, 40, 10, ag.geminiWeekly);
-    printBold(display2, 94, 24, String(ag.geminiWeekly) + "%");
-    display2.setCursor(122, 24);
+    // Row 1: Gemini (y = 22)
+    printBold(display2, 8, 21, "Gemini");
+    drawMiniBar(display2, 50, 21, 40, BAR_H, ag.geminiWeekly);
+    printBold(display2, 94, 21, String(ag.geminiWeekly) + "%");
+    display2.setCursor(122, 21);
     display2.print(ag.geminiWeeklyReset);
 
-    printBold(display2, 160, 24, "5H");
-    drawMiniBar(display2, 176, 23, 40, 10, ag.gemini5Hr);
-    printBold(display2, 220, 24, String(ag.gemini5Hr) + "%");
-    display2.setCursor(248, 24);
+    printBold(display2, 160, 21, "5H");
+    drawMiniBar(display2, 176, 21, 40, BAR_H, ag.gemini5Hr);
+    printBold(display2, 220, 21, String(ag.gemini5Hr) + "%");
+    display2.setCursor(248, 21);
     display2.print(ag.gemini5HrReset);
 
-    // Row 2: Claude & GPT (y = 43)
-    printBold(display2, 8, 43, "Claude");
-    drawMiniBar(display2, 50, 42, 40, 10, ag.claudeWeekly);
-    printBold(display2, 94, 43, String(ag.claudeWeekly) + "%");
-    display2.setCursor(122, 43);
+    // Row 2: Claude & GPT (y = 33)
+    printBold(display2, 8, 32, "Claude");
+    drawMiniBar(display2, 50, 32, 40, BAR_H, ag.claudeWeekly);
+    printBold(display2, 94, 32, String(ag.claudeWeekly) + "%");
+    display2.setCursor(122, 32);
     display2.print(ag.claudeWeeklyReset);
 
-    printBold(display2, 160, 43, "5H");
-    drawMiniBar(display2, 176, 42, 40, 10, ag.claude5Hr);
-    printBold(display2, 220, 43, String(ag.claude5Hr) + "%");
-    display2.setCursor(248, 43);
+    printBold(display2, 160, 32, "5H");
+    drawMiniBar(display2, 176, 32, 40, BAR_H, ag.claude5Hr);
+    printBold(display2, 220, 32, String(ag.claude5Hr) + "%");
+    display2.setCursor(248, 32);
     display2.print(ag.claude5HrReset);
+
+    // Row 3: Gemini 4 Argon (y = 44) - มีเฉพาะใน Antigravity รุ่นใหม่ ไม่มีก็ไม่วาดแถวนี้
+    if (ag.argonWeekly >= 0) {
+      printBold(display2, 8, 43, "Argon");
+      drawMiniBar(display2, 50, 43, 40, BAR_H, ag.argonWeekly);
+      printBold(display2, 94, 43, String(ag.argonWeekly) + "%");
+      display2.setCursor(122, 43);
+      display2.print(ag.argonWeeklyReset);
+    }
   } else {
-    printBold(display2, 84, 6, "[CLOSED]");
-    printBold(display2, 8, 28, "IDE Not Running / Closed");
-    display2.setCursor(8, 43);
+    printBold(display2, 84, 5, "[CLOSED]");
+    printBold(display2, 8, 21, "IDE Not Running / Closed");
+    display2.setCursor(8, 32);
     display2.print("Open Antigravity IDE to view live quota");
   }
-  drawWiFiIconEink(display2, 272, 3);
+  drawWiFiIconEink(display2, 272, 1);
 
   // -----------------------------------------------------------------------
-  // CARD 2: CLAUDE CODE (กรอบล่าง x=2, y=66, w=292, h=60, r=4)
+  // CARD 2: CLAUDE CODE (x=0, y=59, w=296, h=33, r=4)
   // -----------------------------------------------------------------------
-  display2.drawRoundRect(2, 66, 292, 60, 4, GxEPD_BLACK);
-  display2.drawLine(2, 81, 293, 81, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
+  display2.drawRoundRect(0, 59, 296, 33, 4, GxEPD_BLACK);
+  display2.drawLine(0, 75, 295, 75, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
 
-  // Header (y = 70) - เวลา last update อยู่หลังชื่อโมเดลทันที
-  printBold(display2, 8, 70, "CLAUDE CODE");
+  // Header (y = 63)
+  printBold(display2, 8, 64, "CLAUDE CODE");
   if (cc.lastUpdated.length() > 0) {
-    display2.setCursor(84, 70);
+    display2.setCursor(84, 64);
     display2.print(cc.lastUpdated);
   }
 
   String ccPlan = formatPlanName(cc.planType);
   if (ccPlan.length() > 0) {
-    printBold(display2, 142, 70, "[" + ccPlan + "]");
+    printBold(display2, 142, 64, "[" + ccPlan + "]");
   }
 
   if (cc.rateLimited) {
-    drawRateLimitBanner(display2, 190, 68, cc.rateLimitReset);
+    drawRateLimitBanner(display2, 190, 62, cc.rateLimitReset);
   }
 
-  // Row 1: Plan Limits (y = 88)
-  printBold(display2, 8, 88, "Limit");
-  drawMiniBar(display2, 48, 87, 40, 10, cc.weekly);
-  printBold(display2, 92, 88, String(cc.weekly) + "%");
-  display2.setCursor(120, 88);
+  // Row 1: Plan Limits (y = 79)
+  printBold(display2, 8, 80, "Limit");
+  drawMiniBar(display2, 48, 80, 40, BAR_H, cc.weekly);
+  printBold(display2, 92, 80, String(cc.weekly) + "%");
+  display2.setCursor(120, 80);
   display2.print(cc.weeklySub);
 
-  printBold(display2, 160, 88, "5H");
-  drawMiniBar(display2, 176, 87, 40, 10, cc.fiveHr);
-  printBold(display2, 220, 88, String(cc.fiveHr) + "%");
-  display2.setCursor(248, 88);
+  printBold(display2, 160, 80, "5H");
+  drawMiniBar(display2, 176, 80, 40, BAR_H, cc.fiveHr);
+  printBold(display2, 220, 80, String(cc.fiveHr) + "%");
+  display2.setCursor(248, 80);
   display2.print(cc.fiveHrSub);
 
-  // Row 2: Tokens (y = 107)
-  printBold(display2, 8, 107, "Tokens");
-  printBold(display2, 48, 107, "Day:");
-  printBold(display2, 74, 107, cc.todayTotal);
-  display2.setCursor(110, 107);
-  display2.print("(c:" + cc.todayCache + ")");
+  // -----------------------------------------------------------------------
+  // CARD 3: OPENAI CODEX (x=0, y=95, w=296, h=33, r=4)
+  // -----------------------------------------------------------------------
+  display2.drawRoundRect(0, 95, 296, 33, 4, GxEPD_BLACK);
+  display2.drawLine(0, 111, 295, 111, GxEPD_BLACK); // เส้นคั่น Header ในการ์ด
 
-  printBold(display2, 170, 107, "5H:");
-  printBold(display2, 192, 107, cc.windowTotal);
-  display2.setCursor(228, 107);
-  display2.print("(c:" + cc.windowCache + ")");
+  // Header (y = 98)
+  printBold(display2, 8, 100, "OPENAI CODEX");
+  if (codex.lastUpdated.length() > 0) {
+    display2.setCursor(88, 100);
+    display2.print(codex.lastUpdated);
+  }
+
+  String codexPlan = formatPlanName(codex.planType);
+  if (codexPlan.length() > 0) {
+    printBold(display2, 142, 100, "[" + codexPlan + "]");
+  }
+
+  if (codex.rateLimited) {
+    drawRateLimitBanner(display2, 190, 98, codex.rateLimitReset);
+  }
+
+  // Row 1: Weekly Limit (y = 114)
+  printBold(display2, 8, 116, "Weekly");
+  bool hasPrimaryQuota = codex.primaryPercent >= 0 &&
+                         !(codex.primaryPercent == 100 && codex.primaryReset.length() == 0);
+  if (codex.connected && hasPrimaryQuota) {
+    drawMiniBar(display2, 52, 116, 60, BAR_H, codex.primaryPercent);
+    printBold(display2, 118, 116, String(codex.primaryPercent) + "%");
+    display2.setCursor(154, 116);
+    display2.print(codex.primaryReset);
+  } else if (codex.connected) {
+    display2.setCursor(52, 116);
+    display2.print("Syncing usage...");
+  } else {
+    printBold(display2, 52, 116, "Not Connected");
+  }
 }
 
 String formatPlanName(String plan) {
