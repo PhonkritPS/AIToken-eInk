@@ -187,6 +187,7 @@ struct ClaudeCodeData {
   String windowCache = "0";
   bool rateLimited = false;
   String rateLimitReset = "";
+  bool stale = false; // bridge ดึงโควต้าไม่สำเร็จ (เช่น token หมดอายุ) ค่า % เป็นค่าเก่าตั้งแต่ lastUpdated
   String lastUpdated = "";
 
   bool operator!=(const ClaudeCodeData &o) const {
@@ -194,7 +195,8 @@ struct ClaudeCodeData {
            weeklySub != o.weeklySub || fiveHrSub != o.fiveHrSub ||
            todayTotal != o.todayTotal || todayCache != o.todayCache ||
            windowTotal != o.windowTotal || windowCache != o.windowCache ||
-           rateLimited != o.rateLimited || rateLimitReset != o.rateLimitReset;
+           rateLimited != o.rateLimited || rateLimitReset != o.rateLimitReset ||
+           stale != o.stale;
   }
 };
 
@@ -243,6 +245,7 @@ void drawDisplay2Data(const ClaudeCodeData &cc, const AntigravityData &ag, const
 void drawMiniBar(Adafruit_GFX &gfx, int x, int y, int w, int h, int percent);
 void printBold(Adafruit_GFX &gfx, int x, int y, const String &text);
 void drawRateLimitBanner(Adafruit_GFX &gfx, int x, int y, const String &resetText);
+void drawAlertBanner(Adafruit_GFX &gfx, int x, int y, const String &msg);
 void drawWiFiIconEink(Adafruit_GFX &gfx, int x, int y);
 void drawBootScreen(const char *text);
 void drawBootScreen2(const char *text);
@@ -478,6 +481,7 @@ void fetchAndDisplayQuota() {
       cc.windowCache = doc["ccWindowCache"] | "0";
       cc.rateLimited = doc["ccRateLimited"] | false;
       cc.rateLimitReset = doc["ccRateLimitReset"] | "";
+      cc.stale = doc["ccStale"] | false;
       cc.lastUpdated = doc["ccLastUpdated"] | "";
 
       // -------------------------------------------------------------
@@ -827,6 +831,8 @@ void drawDisplay2Data(const ClaudeCodeData &cc, const AntigravityData &ag, const
 
   if (cc.rateLimited) {
     drawRateLimitBanner(display2, 190, 62, cc.rateLimitReset);
+  } else if (cc.stale) {
+    drawAlertBanner(display2, 190, 62, "STALE"); // เวลาที่ค้างดูได้จาก lastUpdated ข้างหน้า
   }
 
   // Row 1: Plan Limits (y = 79)
@@ -922,6 +928,11 @@ void printBold(Adafruit_GFX &gfx, int x, int y, const String &text) {
 void drawRateLimitBanner(Adafruit_GFX &gfx, int x, int y, const String &resetText) {
   String msg = "RATE LIMIT";
   if (resetText.length() > 0) msg += " " + resetText;
+  drawAlertBanner(gfx, x, y, msg);
+}
+
+// แถบเตือนทั่วไป (พื้นดำ-ตัวหนังสือขาว) เช่น "STALE" ตอนค่าโควต้าค้าง
+void drawAlertBanner(Adafruit_GFX &gfx, int x, int y, const String &msg) {
   int boxW = (int)msg.length() * 6 + 6;
   int boxH = 11;
 
